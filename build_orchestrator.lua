@@ -58,9 +58,9 @@ local function compile_engine(platform)
         print("\n[1/3] Compiling SPIR-V Shaders...")
         -- [THE FIX] Call glslc.exe directly from the SDK folder!
         local glslc = VULKAN_SDK_PATH .. "/Bin/glslc.exe"
-        os.execute(glslc .. " render.vert -o render_vert.spv")
-        os.execute(glslc .. " render.frag -o render_frag.spv")
-        os.execute("glslc swarm.comp -o swarm_comp.spv")
+        -- os.execute(glslc .. " render.vert -o render_vert.spv")
+        -- os.execute(glslc .. " render.frag -o render_frag.spv")
+        -- os.execute("glslc swarm.comp -o swarm_comp.spv")
 
         -- print("\n[2/3] Compiling AVX2 Physics Backend (.dll) ...")
         -- local win_backend = "gcc -O3 -mavx -mavx2 -mfma -shared vibemath.c -o vibemath.dll"
