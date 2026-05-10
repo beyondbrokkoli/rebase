@@ -62,14 +62,21 @@ local function compile_engine(platform)
         os.execute(glslc .. " render.frag -o render_frag.spv")
         os.execute("glslc swarm.comp -o swarm_comp.spv")
 
-        print("\n[2/3] Compiling AVX2 Physics Backend (.dll) ...")
-        local win_backend = "gcc -O3 -mavx -mavx2 -mfma -shared vibemath.c -o vibemath.dll"
-        os.execute(win_backend)
+        -- print("\n[2/3] Compiling AVX2 Physics Backend (.dll) ...")
+        -- local win_backend = "gcc -O3 -mavx -mavx2 -mfma -shared vibemath.c -o vibemath.dll"
+        -- os.execute(win_backend)
 
-        print("\n[3/3] Compiling Vulkan Host (.exe) ...")
+        -- print("\n[3/3] Compiling Vulkan Host (.exe) ...")
+        -- local win_frontend = string.format(
+            -- 'gcc main.c -O3 -I"%s/Include" -L"%s/Lib" -lws2_32 -lglfw3 -lvulkan-1 -lluajit-5.1 -o swarm_gpu.exe',
+            -- VULKAN_SDK_PATH, VULKAN_SDK_PATH
+        -- )
+        -- os.execute(win_frontend)
+        local LUA_INC = "C:/msys64/mingw64/include/luajit-2.1"
+
         local win_frontend = string.format(
-            'gcc main.c -O3 -I"%s/Include" -L"%s/Lib" -lws2_32 -lglfw3 -lvulkan-1 -lluajit-5.1 -o swarm_gpu.exe',
-            VULKAN_SDK_PATH, VULKAN_SDK_PATH
+            'gcc main.c memory.c -O3 -I"%s/Include" -I"%s" -L"%s/Lib" -lws2_32 -lglfw3 -lvulkan-1 -lluajit-5.1 -o swarm_gpu.exe',
+            VULKAN_SDK_PATH, LUA_INC, VULKAN_SDK_PATH
         )
         os.execute(win_frontend)
         -- ==========================================
@@ -180,7 +187,7 @@ table.insert(order, "main.c")
 table.insert(order, "memory.c")
 table.insert(order, "memory.h")
 table.insert(order, "control_board.h")
-
+table.insert(order, "build_orchestrator.lua")
 for _, src in ipairs(order) do
     local f = io.open(src, "r")
     if f then
