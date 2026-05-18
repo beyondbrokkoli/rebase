@@ -28,9 +28,7 @@ vk = lib
 
 local core = {}
 
--- =========================================================
 -- PART 1: Instance Creation (Before the Yield)
--- =========================================================
 function core.create_instance()
     print("[LUA] Initializing Vulkan Core (Instance Generation)...")
 
@@ -86,9 +84,7 @@ function core.create_instance()
     }
 end
 
--- =========================================================
 -- PART 2: Logical Device & Queue Generation (After the Yield)
--- =========================================================
 function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     print("[LUA] Resuming Vulkan Setup. Finalizing Logical Device...")
 
@@ -186,9 +182,7 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     return vk_state
 end
 
--- =========================================================
 -- TEARDOWN
--- =========================================================
 function core.Destroy(vk_state)
     print("[TEARDOWN] Shutting down Vulkan Core...")
     local vk = vk_state.vk

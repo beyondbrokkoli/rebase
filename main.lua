@@ -150,7 +150,7 @@ local function main()
     local idx_usage = bit.bor(64, 256)
     memory.CreateHostVisibleBuffer("MASTER_INDEX_BLOCK", "uint32_t", INDEX_SIZE / 4, idx_usage, vk_state)
 
-    local requested_count = 1000000
+    local requested_count = 12000000
     local padded_capacity = math.ceil(requested_count / 8) * 8
     memory.AllocateSoA("float", padded_capacity, {"px", "py", "pz", "vx", "vy", "vz", "seed"})
 
@@ -234,7 +234,7 @@ local function main()
     pc.pos_x_idx = 0
     pc.pos_y_idx = -16000000
     pc.pos_z_idx = 2000000
-    pc.particle_count = 1000000
+    pc.particle_count = 12000000
     pc.dt = 0.0
 
     local proj = ffi.new("mat4_t")
