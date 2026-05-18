@@ -24,63 +24,67 @@ local function copy_file(source, destination)
     return true
 end
 
+-- Safe OS execute wrapper to prevent swallowing errors in Lua 5.1 vs 5.4
+local function run_cmd(cmd)
+    local res = os.execute(cmd)
+    return (res == true or res == 0)
+end
+
 local function compile_engine(platform)
     print("========================================")
-    print("   VIBE ENGINE BUILD ORCHESTRATOR")
+    print("   VULKAN ENGINE BUILD ORCHESTRATOR")
     print("   Target Platform: " .. string.upper(platform))
     print("========================================")
 
     if platform == "linux" then
-        -- ==========================================
         -- LINUX BUILD PIPELINE
-        -- ==========================================
         print("\n[1/3] Compiling SPIR-V Shaders...")
-        print("render")
-        -- os.execute("glslc render.vert -o render_vert.spv")
-        print("frag")
-        -- os.execute("glslc render.frag -o render_frag.spv")
-        print("comp")
-        -- os.execute("glslc swarm.comp -o swarm_comp.spv")
+        os.execute("glslc render.vert -o render_vert.spv")
+        os.execute("glslc render.frag -o render_frag.spv")
+        os.execute("glslc swarm.comp -o swarm_comp.spv")
 
-        print("\n[2/3] Compiling AVX2 Physics Backend (.so) ...")
-        local linux_backend = "gcc -O3 -mavx -mavx2 -mfma -shared -fPIC vibemath.c -o libvibemath.so -lm -lpthread"
-        -- os.execute(linux_backend)
+        print("\n[2/3] Compiling libvibemath.so (AVX2 Worker Pool) ...")
+        local linux_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -fPIC -pthread vibemath.c -o libvibemath.so -lm"
+        if not run_cmd(linux_build_vibemath) then
+            print("ERROR: vibemath compilation failed!")
+            os.exit(1)
+        end
 
-        print("\n[3/3] Compiling Vulkan Host (ELF Binary) ...")
-        --local linux_frontend = "gcc main.c -O3 -I/usr/include/luajit-2.1 -lglfw -lvulkan -lluajit-5.1 -o swarm_gpu"
-        local linux_frontend = "gcc main.c memory.c -O3 -I/usr/include/luajit-2.1 -lglfw -lvulkan -lluajit-5.1 -o swarm_gpu"
-        os.execute(linux_frontend)
+        print("\n[3/3] Compiling Vulkan-Engine (Monolithic AVX2 Host) ...")
+        local linux_build_main = "gcc main.c -O3 -march=x86-64-v3 -Wl,-E -I/usr/include/luajit-2.1 -lglfw -lvulkan -lluajit-5.1 -lm -lpthread -o boot"
+        if not run_cmd(linux_build_main) then
+            print("ERROR: main.c compilation failed!")
+            os.exit(1)
+        end
 
     elseif platform == "win" then
-        -- ==========================================
         -- WINDOWS BUILD PIPELINE
-        -- ==========================================
-        print("\n[1/3] Compiling SPIR-V Shaders...")
-        -- [THE FIX] Call glslc.exe directly from the SDK folder!
+        print("\n[1/4] Compiling SPIR-V Shaders...")
         local glslc = VULKAN_SDK_PATH .. "/Bin/glslc.exe"
-        -- os.execute(glslc .. " render.vert -o render_vert.spv")
-        -- os.execute(glslc .. " render.frag -o render_frag.spv")
-        -- os.execute("glslc swarm.comp -o swarm_comp.spv")
+        os.execute(glslc .. " render.vert -o render_vert.spv")
+        os.execute(glslc .. " render.frag -o render_frag.spv")
+        os.execute(glslc .. " swarm.comp -o swarm_comp.spv")
 
-        -- print("\n[2/3] Compiling AVX2 Physics Backend (.dll) ...")
-        -- local win_backend = "gcc -O3 -mavx -mavx2 -mfma -shared vibemath.c -o vibemath.dll"
-        -- os.execute(win_backend)
+        print("\n[2/4] Compiling vibemath.dll (AVX2 Worker Pool) ...")
+        local win_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -pthread vibemath.c -o vibemath.dll -lm"
+        if not run_cmd(win_build_vibemath) then
+            print("ERROR: vibemath.dll compilation failed!")
+            os.exit(1)
+        end
 
-        -- print("\n[3/3] Compiling Vulkan Host (.exe) ...")
-        -- local win_frontend = string.format(
-            -- 'gcc main.c -O3 -I"%s/Include" -L"%s/Lib" -lws2_32 -lglfw3 -lvulkan-1 -lluajit-5.1 -o swarm_gpu.exe',
-            -- VULKAN_SDK_PATH, VULKAN_SDK_PATH
-        -- )
-        -- os.execute(win_frontend)
+        print("\n[3/4] Compiling Vulkan-Engine.exe (Monolithic AVX2 Host) ...")
         local LUA_INC = "C:/msys64/mingw64/include/luajit-2.1"
-
-        local win_frontend = string.format(
-            'gcc main.c memory.c -O3 -I"%s/Include" -I"%s" -L"%s/Lib" -lws2_32 -lglfw3 -lvulkan-1 -lluajit-5.1 -o swarm_gpu.exe',
-            VULKAN_SDK_PATH, LUA_INC, VULKAN_SDK_PATH
+        local win_build_main = string.format(
+            'gcc main.c -O3 -march=x86-64-v3 -I"%s" -I"%s/Include" -L"%s/Lib" -lws2_32 -lglfw3 -lvulkan-1 -lluajit-5.1 -lm -o boot.exe',
+            LUA_INC, VULKAN_SDK_PATH, VULKAN_SDK_PATH
         )
-        os.execute(win_frontend)
+        if not run_cmd(win_build_main) then
+            print("ERROR: boot.exe compilation failed!")
+            os.exit(1)
+        end
+
         -- ==========================================
-        -- [THE HEIST] AUTOMATICALLY COPY DEPENDENCIES
+        -- AUTOMATIC DEPENDENCY PACKING
         -- ==========================================
         print("\n[4/4] Packing Windows Dependencies (DLLs)...")
         copy_file("C:/msys64/mingw64/bin/glfw3.dll", "glfw3.dll")
@@ -173,8 +177,6 @@ end
 -- EXECUTION
 -- ==========================================================
 
--- Grab the first argument passed to the script (e.g., lua build.lua linux)
--- Default to "linux" if the user forgets to type it.
 local target_platform = arg[1] or "linux"
 
 compile_engine(target_platform)
@@ -182,12 +184,10 @@ compile_engine(target_platform)
 print("\n--- AI SNAPSHOT ---")
 local order = get_sorted_files()
 
--- Explicitly add C backend to the snapshot since require() won't find it
+-- Explicitly add C backends to the snapshot since require() won't find them
 table.insert(order, "main.c")
-table.insert(order, "memory.c")
-table.insert(order, "memory.h")
-table.insert(order, "control_board.h")
-table.insert(order, "build_orchestrator.lua")
+table.insert(order, "vibemath.c")
+
 for _, src in ipairs(order) do
     local f = io.open(src, "r")
     if f then

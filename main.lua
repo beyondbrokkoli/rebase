@@ -1,145 +1,466 @@
 local ffi = require("ffi")
-local DebugProxy = require("debug_proxy")
+local bit = require("bit")
+local math = require("math")
+local vmath = require("vmath")
+local vulkan_core = require("vulkan_core")
+local memory = require("memory")
+local swapchain_core = require("swapchain")
+local descriptors = require("descriptors")
+local compute = require("compute_pipeline")
+local graphics = require("graphics_pipeline")
+local renderer = require("renderer")
+local os = require("os")
 
--- ========================================================
--- 1. CROSS-PLATFORM SLEEP
--- ========================================================
-if ffi.os == "Windows" then
-    ffi.cdef[[ void Sleep(uint32_t ms); ]]
-else
-    ffi.cdef[[ int usleep(uint32_t usec); ]]
-end
+ffi.cdef[[
+    int vibe_get_is_running();
+    void vibe_trigger_shutdown();
+    void vibe_mark_lua_finished();
+    const char** vibe_get_glfw_extensions(uint32_t* count);
+    void vibe_publish_vk_instance(void* instance);
+    void* vibe_get_vk_surface();
+    void vibe_set_glfw_cmd(int cmd, int w, int h);
+    int vibe_get_last_key();
+    uint32_t vibe_get_wasd();
+    float vibe_get_mouse_dx();
+    float vibe_get_mouse_dy();
+    int vibe_get_resize_flag();
+    void vibe_get_window_size(int* w, int* h);
 
-local function os_sleep(ms)
-    if ffi.os == "Windows" then
+    typedef struct {
+        mat4_t viewProj;           // Offset 0 (64 bytes)
+        uint32_t pos_x_idx;        // Offset 64 (4 bytes)
+        uint32_t pos_y_idx;        // Offset 68 (4 bytes)
+        uint32_t pos_z_idx;        // Offset 72 (4 bytes)
+        uint32_t particle_count;   // Offset 76 (4 bytes)
+        float dt;                  // Offset 80 (4 bytes)
+
+        uint32_t vel_x_idx;        // Offset 84
+        uint32_t vel_y_idx;        // Offset 88
+        uint32_t vel_z_idx;        // Offset 92
+        uint32_t target_state;     // Offset 96
+        uint32_t push_active;      // Offset 100
+        uint32_t pull_active;      // Offset 104
+        float mouse_x;             // Offset 108
+        float mouse_y;             // Offset 112
+        uint32_t _padding[3];      // Remaining 12 bytes untouched
+    } PushConstants;               // Total: 128 bytes
+
+    // WSI Bridge Struct
+    typedef struct {
+        VkDevice device;
+        VkQueue queue;
+        VkSwapchainKHR swapchain;
+        uint64_t swapchain_images[10];
+        uint64_t swapchain_views[10];
+        VkSemaphore image_available[3];
+        VkSemaphore render_finished[10];
+        VkFence in_flight[3];
+        void* vkWaitForFences;
+        void* vkAcquireNextImageKHR;
+        void* vkResetFences;
+        void* vkQueueSubmit;
+        void* vkQueuePresentKHR;
+        void* pfnBegin;
+        void* pfnEnd;
+    } RenderThreadInit;
+
+    void vmath_init_workers(int num_threads);
+    void vmath_destroy_workers();
+
+    typedef struct __attribute__((packed, aligned(64))) {
+        uint64_t comp_pipeline;
+        uint64_t comp_layout;
+        uint64_t gfx_pipeline;
+        uint64_t gfx_layout;
+        uint64_t desc_set;
+        uint64_t vertex_buffer;
+        uint64_t index_buffer;
+        uint64_t swapchain_image;
+        uint64_t swapchain_view;
+        uint64_t depth_image;
+        uint64_t depth_view;
+        uint32_t width;
+        uint32_t height;
+        uint8_t pc_payload[128];
+        uint8_t _padding[32];
+    } RenderPacket;
+
+    void vibe_stream_positions(int count, float* c_px, float* c_py, float* c_pz, float* g_px, float* g_py, float* g_pz);
+    void vibe_record_commands(RenderPacket* p, void* pfnBegin, void* pfnEnd);
+    int vibe_ring_get_write_idx();
+    RenderPacket* vibe_ring_get_packet(int idx);
+    void vibe_ring_submit(int idx);
+    void vibe_ring_init_wsi(RenderThreadInit* wsi);
+    void vibe_start_render_thread();
+    void vibe_kill_render_thread();
+    int vibe_get_mouse_btn(int btn);
+    int vibe_get_spacebar();
+
+    typedef struct {
+        uint32_t target_state;
+        uint32_t push_active;
+        uint32_t pull_active;
+        float mouse_x;
+        float mouse_y;
+        uint32_t _padding[3];
+    } SwarmCommand;
+
+    void vmath_dispatch_swarm(
+        int count,
+        float* px, float* py, float* pz,
+        float* vx, float* vy, float* vz,
+        float* seed,
+        const SwarmCommand* cmd,
+        float time, float dt, float gravity,
+        float blend_metal, float blend_paradox
+    );
+
+    void Sleep(uint32_t dwMilliseconds); // Windows
+    int usleep(uint32_t usec);           // Linux
+]]
+local function sys_sleep(ms)
+    if jit.os == "Windows" then
         ffi.C.Sleep(ms)
     else
         ffi.C.usleep(ms * 1000)
     end
 end
+local vmath_lib = ffi.load(jit.os == "Windows" and "vibemath.dll" or "./libvibemath.so")
 
--- ========================================================
--- 2. THE GENERALIZED FFI SCHEMA
--- ========================================================
-ffi.cdef[[
-    // --- Data Stream Primitives ---
-    typedef struct { uint32_t vertexCount; uint32_t instanceCount; uint32_t firstVertex; uint32_t firstInstance; } VkDrawIndirectCommand;
-    typedef struct { float x, y, z, w; } VertexAoS;
+local function main()
+    print("[LUA IO] Booting Headless...")
+    local vk_state = vulkan_core.create_instance()
+    ffi.C.vibe_publish_vk_instance(vk_state.instance)
 
-    // --- VRAM Injection Payload ---
-    typedef struct {
-        uint32_t max_particles;
-        float *px_A, *py_A, *pz_A, *vx_A, *vy_A, *vz_A, *seed_A, *mat_A;
-        float *px_B, *py_B, *pz_B, *vx_B, *vy_B, *vz_B, *seed_B, *mat_B;
-        VertexAoS *render_A, *render_B;
-        uint32_t *grid_A, *grid_B;
-        VkDrawIndirectCommand *draw_cmd_A, *draw_cmd_B;
-    } VramInjectionBoard;
+    print("[LUA IO] Ordering C-Core to Boot GLFW Window...")
+    ffi.C.vibe_set_glfw_cmd(1, 1280, 720)
 
-    // --- Asynchronous Control Structures ---
-    typedef struct { uint32_t sequence; float matrix[16]; } AsyncCameraMatrix;
-    typedef struct { int is_running; int force_draw_buffer; int debug_frame_step; } CoreStateBoard;
-    typedef struct { uint32_t total_active_count; uint32_t cpu_core_offset; uint32_t cpu_core_count; uint32_t gpu_hunters_offset; uint32_t gpu_hunters_count; uint32_t gpu_boids_offset; uint32_t gpu_boids_count; uint32_t gpu_meteors_offset; uint32_t gpu_meteors_count; } AtlasBoard;
-    typedef struct { int swarm_state; float params[16]; } SimulationBoard;
-    typedef struct { uint32_t mouse_buttons; float mouse_x; float mouse_y; uint32_t key_states; } InputBoard;
-
-    typedef struct {
-        CoreStateBoard  core;
-        AtlasBoard      atlas;
-        SimulationBoard sim;
-        InputBoard      input;
-        AsyncCameraMatrix camera;
-    } EngineControlBoard;
-
-    // --- Telemetry ---
-    typedef struct { uint64_t ptr_address; size_t size_bytes; int alignment; char name[32]; } BufferTelemetry;
-    typedef struct { uint64_t bridge_crossings; int current_c_phase; BufferTelemetry buffers[14]; } EngineTelemetryBoard;
-]]
-
--- ========================================================
--- 3. PARAMETER MAPPING
--- ========================================================
-local Params = {
-    GRAVITY_BLEND = 0,
-    METAL_BLEND   = 1,
-    PARADOX_BLEND = 2,
-    QUANTUM_JITTER = 6
-}
-
--- ========================================================
--- 4. HARDWARE BINDING
--- ========================================================
-print("\n[LUA VM] Thread 5 Awoken. Binding hardware...")
-
-local t_str, c_str = C_Bridge.get_boards()
-local telemetry_ptr = ffi.cast("EngineTelemetryBoard*", tonumber(t_str))
-local control_ptr   = ffi.cast("EngineControlBoard*", tonumber(c_str))
-
-pcall(function() DebugProxy.BindHardware(telemetry_ptr, control_ptr) end)
-
--- ========================================================
--- 4.5 THE INJECTION PATCH (The "Heist" Signal)
--- ========================================================
-local function ptr2str(ptr)
-    if ptr == nil then return "0" end
-    local cdata_num = ffi.cast("uint64_t", ffi.cast("uintptr_t", ptr))
-    return string.match(tostring(cdata_num), "%d+")
-end
-
-print("[LUA VM] Preparing VRAM Injection Payload...")
-
-local Anchors = {}
-local function sim_rebar_float(n) 
-    local mem = ffi.new("float[?]", n)
-    table.insert(Anchors, mem)
-    return ffi.cast("float*", mem) 
-end
-
--- FIX: Allocate as a 1-element array to get a pointer
-local payload_ptr = ffi.new("VramInjectionBoard[1]")
-local payload = payload_ptr[0] -- Reference to the struct data
-payload.max_particles = 15000000
-local count = payload.max_particles
-
--- [PHASE A]
-payload.px_A, payload.py_A, payload.pz_A = sim_rebar_float(count), sim_rebar_float(count), sim_rebar_float(count)
-payload.vx_A, payload.vy_A, payload.vz_A = sim_rebar_float(count), sim_rebar_float(count), sim_rebar_float(count)
-payload.seed_A, payload.mat_A = sim_rebar_float(count), sim_rebar_float(count)
-
--- [PHASE B]
-payload.px_B, payload.py_B, payload.pz_B = sim_rebar_float(count), sim_rebar_float(count), sim_rebar_float(count)
-payload.vx_B, payload.vy_B, payload.vz_B = sim_rebar_float(count), sim_rebar_float(count), sim_rebar_float(count)
-payload.seed_B, payload.mat_B = sim_rebar_float(count), sim_rebar_float(count)
-
--- [RENDER & TOPOLOGY]
-payload.render_A = ffi.new("VertexAoS[?]", count); table.insert(Anchors, payload.render_A)
-payload.render_B = ffi.new("VertexAoS[?]", count); table.insert(Anchors, payload.render_B)
-payload.grid_A   = ffi.new("uint32_t[?]", 2097152); table.insert(Anchors, payload.grid_A)
-payload.grid_B   = ffi.new("uint32_t[?]", 2097152); table.insert(Anchors, payload.grid_B)
-payload.draw_cmd_A = ffi.new("VkDrawIndirectCommand"); table.insert(Anchors, payload.draw_cmd_A)
-payload.draw_cmd_B = ffi.new("VkDrawIndirectCommand"); table.insert(Anchors, payload.draw_cmd_B)
-
--- THE HEIST: Pass the pointer-array (payload_ptr) to ptr2str
-C_Bridge.inject_vram(ptr2str(payload_ptr))
-
-print("[LUA VM] Injection successful. C-Core Awakened.")
--- ========================================================
--- 5. THE CO-OVERLORD LOOP
--- ========================================================
-print("[LUA VM] Entering IPC Horizon.")
-local ticks = 0
-
-while control_ptr.core.is_running == 1 do
-    -- Modulate the sandbox
-    control_ptr.sim.params[Params.QUANTUM_JITTER] = math.sin(ticks * 0.01)
-
-    -- Telemetry Heartbeat
-    if ticks % 60 == 0 then
-        DebugProxy.PrintConsole()
+    while ffi.C.vibe_get_vk_surface() == nil do
+        -- Spinlock waiting for async C core window creation
     end
 
-    ticks = ticks + 1
-    os_sleep(16)
+    local surface_ptr = ffi.C.vibe_get_vk_surface()
+    vulkan_core.finalize_device_and_swapchain(vk_state, surface_ptr)
+
+    local vk = vk_state.vk
+    local device = vk_state.device
+
+    local usage_flags = bit.bor(32, 128, 256)
+    local INDEX_SIZE = 12000000 * 4
+    local idx_usage = bit.bor(64, 256)
+    memory.CreateHostVisibleBuffer("MASTER_INDEX_BLOCK", "uint32_t", INDEX_SIZE / 4, idx_usage, vk_state)
+
+    local requested_count = 1000000
+    local padded_capacity = math.ceil(requested_count / 8) * 8
+    memory.AllocateSoA("float", padded_capacity, {"px", "py", "pz", "vx", "vy", "vz", "seed"})
+
+    local cpu_soa = {
+        px = memory.AVX_Arrays["px"],
+        py = memory.AVX_Arrays["py"],
+        pz = memory.AVX_Arrays["pz"],
+        vx = memory.AVX_Arrays["vx"],
+        vy = memory.AVX_Arrays["vy"],
+        vz = memory.AVX_Arrays["vz"],
+        seed = memory.AVX_Arrays["seed"]
+    }
+
+    local FRAME_FLOAT_COUNT = padded_capacity * 3
+    local TOTAL_FLOAT_COUNT = FRAME_FLOAT_COUNT * 3
+    local UNIVERSE_SIZE_BYTES = TOTAL_FLOAT_COUNT * ffi.sizeof("float")
+    local gpu_usage_flags = bit.bor(32, 128, 256)
+
+    memory.CreateHostVisibleBuffer("MASTER_GPU_BLOCK", "uint8_t", UNIVERSE_SIZE_BYTES, gpu_usage_flags, vk_state)
+    local master_ptr = ffi.cast("float*", memory.Mapped["MASTER_GPU_BLOCK"])
+
+    for p = 0, requested_count - 1 do
+        cpu_soa.seed[p] = math.random()
+        cpu_soa.px[p] = (math.random() - 0.5) * 20000.0
+        cpu_soa.py[p] = (math.random() - 0.5) * 10000.0 + 5000.0
+        cpu_soa.pz[p] = (math.random() - 0.5) * 20000.0
+        cpu_soa.vx[p] = 0.0
+        cpu_soa.vy[p] = 0.0
+        cpu_soa.vz[p] = 0.0
+    end
+
+    vmath_lib.vmath_init_workers(8)
+
+    local pWidth = ffi.new("int[1]")
+    local pHeight = ffi.new("int[1]")
+    ffi.C.vibe_get_window_size(pWidth, pHeight)
+
+    local sc_state = swapchain_core.Init(vk, vk_state, pWidth[0], pHeight[0])
+    local desc_state = descriptors.Init(vk, device, memory.Buffers["MASTER_GPU_BLOCK"])
+    local comp_state = compute.Init(vk, device, desc_state.pipelineLayout)
+    local gfx_state = graphics.Init(vk, vk_state, pWidth[0], pHeight[0], desc_state.pipelineLayout, sc_state.format)
+    local sync_state = renderer.InitSync(vk, device, 3)
+    local frame_state = renderer.AllocateFrameState(vk, device, sc_state.extent.width, sc_state.extent.height)
+
+    local wsi = ffi.new("RenderThreadInit")
+    wsi.device = device
+    wsi.queue = vk_state.queue
+    wsi.swapchain = sc_state.handle
+    for i=0, sc_state.imageCount-1 do
+        wsi.swapchain_images[i] = ffi.cast("uint64_t", sc_state.images[i])
+        wsi.swapchain_views[i] = ffi.cast("uint64_t", sc_state.imageViews[i])
+        wsi.render_finished[i] = sync_state.renderFinished[i]
+    end
+    for i=0, 2 do
+        wsi.image_available[i] = sync_state.imageAvailable[i]
+        wsi.in_flight[i] = sync_state.inFlight[i]
+    end
+    wsi.vkWaitForFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkWaitForFences"))
+    wsi.vkAcquireNextImageKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR"))
+    wsi.vkResetFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkResetFences"))
+    wsi.vkQueueSubmit = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueueSubmit"))
+    wsi.vkQueuePresentKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueuePresentKHR"))
+    wsi.pfnBegin = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR"))
+    wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
+
+    ffi.C.vibe_ring_init_wsi(wsi)
+    ffi.C.vibe_start_render_thread()
+
+    -- ==========================================
+    -- HOT PATH OPTIMIZATIONS (Caching Locality)
+    -- ==========================================
+    local master_gpu_block = memory.Buffers["MASTER_GPU_BLOCK"]
+    local master_index_block = memory.Buffers["MASTER_INDEX_BLOCK"]
+
+    local c_px, c_py, c_pz = cpu_soa.px, cpu_soa.py, cpu_soa.pz
+    local c_vx, c_vy, c_vz = cpu_soa.vx, cpu_soa.vy, cpu_soa.vz
+    local c_seed = cpu_soa.seed
+
+    local frame_count = 0
+    local pc = ffi.new("PushConstants")
+    pc.pos_x_idx = 0
+    pc.pos_y_idx = -16000000
+    pc.pos_z_idx = 2000000
+    pc.particle_count = 1000000
+    pc.dt = 0.0
+
+    local proj = ffi.new("mat4_t")
+    local view = ffi.new("mat4_t")
+    local aspect = sc_state.extent.width / sc_state.extent.height
+    vmath.perspective_inf_revz(70.0, aspect, 0.1, proj)
+
+    local cam_pos = {x = 0.0, y = 0.0, z = -600.0}
+    local cam_yaw = 0.0
+    local cam_pitch = 0.0
+    local sensitivity = 0.002
+    local move_speed = 320000.0
+    local is_resizing = false
+    local last_resize_time = 0.0
+    local RESIZE_COOLDOWN = 0.25
+    local last_time = os.clock()
+    local current_swarm_state = 1
+    local MAX_SWARM_STATES = 7
+    local swarm_cmd = ffi.new("SwarmCommand")
+    local space_was_pressed = false
+
+    print("[LUA CO] Entering Flattened Render Loop...")
+    -- FLATTENED RENDER LOOP (No Yielding)
+    while ffi.C.vibe_get_is_running() == 1 do
+        if ffi.C.vibe_get_resize_flag() == 1 then
+            is_resizing = true
+            last_resize_time = os.clock()
+        end
+
+        if is_resizing then
+            if (os.clock() - last_resize_time) > RESIZE_COOLDOWN then
+                print("[LUA CO] Window Stable. Initiating Vulkan Rebuild...")
+                ffi.C.vibe_kill_render_thread()
+                vk.vkDeviceWaitIdle(device)
+
+                local new_w = ffi.new("int[1]")
+                local new_h = ffi.new("int[1]")
+                ffi.C.vibe_get_window_size(new_w, new_h)
+
+                if new_w[0] > 0 and new_h[0] > 0 then
+                    graphics.Destroy(vk, vk_state, gfx_state)
+                    swapchain_core.Destroy(vk, vk_state, sc_state)
+                    renderer.Destroy(vk, device, sync_state, 3)
+
+                    -- JIT SAFE: Replaced pairs() with direct table reassignment
+                    sc_state = swapchain_core.Init(vk, vk_state, new_w[0], new_h[0])
+                    gfx_state = graphics.Init(vk, vk_state, new_w[0], new_h[0], desc_state.pipelineLayout, sc_state.format)
+
+                    local fresh_sync = renderer.InitSync(vk, device, 3)
+                    sync_state.imageAvailable = fresh_sync.imageAvailable
+                    sync_state.renderFinished = fresh_sync.renderFinished
+                    sync_state.inFlight = fresh_sync.inFlight
+
+                    frame_state.viewport[0].width = new_w[0]
+                    frame_state.viewport[0].height = new_h[0]
+                    frame_state.scissor[0].extent.width = new_w[0]
+                    frame_state.scissor[0].extent.height = new_h[0]
+                    frame_state.renderInfo[0].renderArea.extent.width = new_w[0]
+                    frame_state.renderInfo[0].renderArea.extent.height = new_h[0]
+
+                    local safe_h = math.max(1, new_h[0])
+                    aspect = new_w[0] / safe_h
+                    vmath.perspective_inf_revz(70.0, aspect, 0.1, proj)
+
+                    local new_wsi = ffi.new("RenderThreadInit")
+                    new_wsi.device = device
+                    new_wsi.queue = vk_state.queue
+                    new_wsi.swapchain = sc_state.handle
+                    for i=0, sc_state.imageCount-1 do
+                        new_wsi.swapchain_images[i] = ffi.cast("uint64_t", sc_state.images[i])
+                        new_wsi.swapchain_views[i] = ffi.cast("uint64_t", sc_state.imageViews[i])
+                        new_wsi.render_finished[i] = sync_state.renderFinished[i]
+                    end
+                    for i=0, 2 do
+                        new_wsi.image_available[i] = sync_state.imageAvailable[i]
+                        new_wsi.in_flight[i] = sync_state.inFlight[i]
+                    end
+                    new_wsi.vkWaitForFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkWaitForFences"))
+                    new_wsi.vkAcquireNextImageKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR"))
+                    new_wsi.vkResetFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkResetFences"))
+                    new_wsi.vkQueueSubmit = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueueSubmit"))
+                    new_wsi.vkQueuePresentKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueuePresentKHR"))
+                    new_wsi.pfnBegin = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR"))
+                    new_wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
+
+                    ffi.C.vibe_ring_init_wsi(new_wsi)
+                    ffi.C.vibe_start_render_thread()
+                end
+                print("[LUA CO] Rebuild Complete.")
+                is_resizing = false
+                last_time = os.clock()
+            end
+        else
+            local current_time = os.clock()
+            local dt = math.max(0.001, math.min(current_time - last_time, 0.033))
+            last_time = current_time
+
+            local dx = ffi.C.vibe_get_mouse_dx()
+            local dy = ffi.C.vibe_get_mouse_dy()
+            local wasd = ffi.C.vibe_get_wasd()
+
+            cam_yaw = cam_yaw + (dx * sensitivity)
+            cam_pitch = math.max(-1.5, math.min(1.5, cam_pitch + (dy * sensitivity)))
+
+            local fwd_x = math.sin(cam_yaw) * math.cos(cam_pitch)
+            local fwd_y = -math.sin(cam_pitch)
+            local fwd_z = math.cos(cam_yaw) * math.cos(cam_pitch)
+            local right_x = math.cos(cam_yaw)
+            local right_z = -math.sin(cam_yaw)
+            local frame_speed = move_speed * dt
+
+            if bit.band(wasd, 1) ~= 0 then cam_pos.x = cam_pos.x + fwd_x * frame_speed; cam_pos.y = cam_pos.y + fwd_y * frame_speed; cam_pos.z = cam_pos.z + fwd_z * frame_speed end
+            if bit.band(wasd, 2) ~= 0 then cam_pos.x = cam_pos.x - fwd_x * frame_speed; cam_pos.y = cam_pos.y - fwd_y * frame_speed; cam_pos.z = cam_pos.z - fwd_z * frame_speed end
+            if bit.band(wasd, 4) ~= 0 then cam_pos.x = cam_pos.x - right_x * frame_speed; cam_pos.z = cam_pos.z - right_z * frame_speed end
+            if bit.band(wasd, 8) ~= 0 then cam_pos.x = cam_pos.x + right_x * frame_speed; cam_pos.z = cam_pos.z + right_z * frame_speed end
+            if bit.band(wasd, 16) ~= 0 then cam_pos.y = cam_pos.y + frame_speed end
+            if bit.band(wasd, 32) ~= 0 then cam_pos.y = cam_pos.y - frame_speed end
+
+            vmath.lookAt(cam_pos.x, cam_pos.y, cam_pos.z,
+                         cam_pos.x + fwd_x, cam_pos.y + fwd_y, cam_pos.z + fwd_z,
+                         view)
+            pc.dt = pc.dt + dt
+            vmath.multiply_mat4(proj, view, pc.viewProj)
+
+            local space_is_down = (ffi.C.vibe_get_spacebar() == 1)
+            if space_is_down then
+                if not space_was_pressed then
+                    current_swarm_state = (current_swarm_state % MAX_SWARM_STATES) + 1
+                    space_was_pressed = true
+                end
+            else
+                space_was_pressed = false
+            end
+
+            if ffi.C.vibe_get_last_key() == 256 then
+                print("[LUA IO] ESCAPE PRESSED. Executing Teardown...")
+                ffi.C.vibe_trigger_shutdown()
+            end
+
+            swarm_cmd.target_state = current_swarm_state - 1
+            swarm_cmd.push_active = ffi.C.vibe_get_mouse_btn(0)
+            swarm_cmd.pull_active = ffi.C.vibe_get_mouse_btn(1)
+            swarm_cmd.mouse_x = 0.0
+            swarm_cmd.mouse_y = 5000.0
+
+            -- JIT SAFE: Utilizing direct locals instead of cpu_soa table hash lookups
+            vmath_lib.vmath_dispatch_swarm(
+                pc.particle_count,
+                c_px, c_py, c_pz,
+                c_vx, c_vy, c_vz,
+                c_seed,
+                swarm_cmd,
+                pc.dt, dt, 9.81, 1.0, 1.0
+            )
+
+            -- 1. Get the actual ring buffer index for the WSI synchronization
+            local write_idx = ffi.C.vibe_ring_get_write_idx()
+            local frame_offset = write_idx * FRAME_FLOAT_COUNT
+
+            local gpu_px = master_ptr + frame_offset
+            local gpu_py = master_ptr + (frame_offset + padded_capacity)
+            local gpu_pz = master_ptr + (frame_offset + (padded_capacity * 2))
+
+            -- JIT SAFE: Localized SOA pointers streamed out
+            vmath_lib.vibe_stream_positions(
+                padded_capacity,
+                c_px, c_py, c_pz,
+                gpu_px, gpu_py, gpu_pz
+            )
+
+            -- 3. Tell the shaders where the positions live
+            pc.pos_x_idx = frame_offset
+            pc.pos_y_idx = frame_offset + padded_capacity
+            pc.pos_z_idx = frame_offset + (padded_capacity * 2)
+
+            -- 2. Ensure the velocity pointers are bound so the GPU knows where to read/write the foam
+            pc.vel_x_idx = frame_offset + (padded_capacity * 3)
+            pc.vel_y_idx = frame_offset + (padded_capacity * 4)
+            pc.vel_z_idx = frame_offset + (padded_capacity * 5)
+
+            -- JIT SAFE: Cached Vulkan buffers passed in cleanly
+            local success = renderer.ExecuteFrame(
+                sc_state,
+                master_gpu_block,
+                master_index_block,
+                comp_state,
+                gfx_state,
+                pc,
+                desc_state,
+                write_idx
+            )
+
+            if not success then
+                print("[RENDERER] VK_ERROR_OUT_OF_DATE_KHR Triggered! Forcing Rebuild Protocol.")
+                is_resizing = true
+                last_resize_time = os.clock()
+            end
+
+            frame_count = frame_count + 1
+        end
+        sys_sleep(10)
+    end
+
+    print("[LUA CO] Render Loop Terminated. Frames: " .. tostring(frame_count))
+
+    -- TEARDOWN
+    print("[TEARDOWN] Terminating Async Render Thread...")
+    ffi.C.vibe_kill_render_thread()
+    vk.vkDeviceWaitIdle(vk_state.device)
+    vmath_lib.vmath_destroy_workers()
+
+    renderer.Destroy(vk, device, sync_state, 3)
+    graphics.Destroy(vk, vk_state, gfx_state)
+    compute.Destroy(vk, vk_state, comp_state)
+    descriptors.Destroy(vk, device, desc_state)
+    swapchain_core.Destroy(vk, vk_state, sc_state)
+
+    print("[TEARDOWN] Freeing VRAM Arenas...")
+    memory.DestroyBuffer("MASTER_GPU_BLOCK", vk_state)
+    if memory.Buffers["MASTER_INDEX_BLOCK"] then
+        memory.DestroyBuffer("MASTER_INDEX_BLOCK", vk_state)
+    end
+
+    vulkan_core.Destroy(vk_state)
 end
 
-print("\n[LUA VM] Engine shutdown detected. Exiting gracefully...")
+-- Fire it up procedurally
+main()
+ffi.C.vibe_mark_lua_finished()
