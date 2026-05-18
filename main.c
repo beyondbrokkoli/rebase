@@ -470,7 +470,7 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, PFN_vkCmd
     vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
 
     // Push constants for graphics
-    vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, p->pc_payload);
+    vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, p->pc_payload);
 
     // vkCmdDraw(cmd, local_pc->particle_count, 1, 0, 0);
     // Draw 24 vertices (8 faces) for every instance
