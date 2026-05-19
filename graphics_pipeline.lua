@@ -106,14 +106,27 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local viewportState = ffi.new("VkPipelineViewportStateCreateInfo")
     ffi.fill(viewportState, ffi.sizeof(viewportState)); viewportState.sType = 22; viewportState.viewportCount = 1; viewportState.scissorCount = 1
 
+    -- 1. Rasterizer: Set to a neutral default
     local rasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo")
-    ffi.fill(rasterizer, ffi.sizeof(rasterizer)); rasterizer.sType = 23; rasterizer.polygonMode = 0; rasterizer.lineWidth = 1.0
+    ffi.fill(rasterizer, ffi.sizeof(rasterizer))
+    rasterizer.sType = 23
+    rasterizer.polygonMode = 0
+    rasterizer.lineWidth = 1.0
+    -- Set cullMode to NONE statically, so the dynamic state is free to override it
+    rasterizer.cullMode = 0 -- VK_CULL_MODE_NONE
+    rasterizer.frontFace = 1 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+
+    -- 2. DepthStencil: Set to neutral defaults
+    local depthStencil = ffi.new("VkPipelineDepthStencilStateCreateInfo")
+    ffi.fill(depthStencil, ffi.sizeof(depthStencil))
+    depthStencil.sType = 25
+    -- Set these to FALSE statically, so dynamic calls can turn them ON
+    depthStencil.depthTestEnable = 0
+    depthStencil.depthWriteEnable = 0
+    depthStencil.depthCompareOp = 0 -- VK_COMPARE_OP_NEVER (will be overridden)
 
     local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo")
     ffi.fill(multisampling, ffi.sizeof(multisampling)); multisampling.sType = 24; multisampling.rasterizationSamples = 1
-
-    local depthStencil = ffi.new("VkPipelineDepthStencilStateCreateInfo")
-    ffi.fill(depthStencil, ffi.sizeof(depthStencil)); depthStencil.sType = 25
 
     local colorBlendAttachment = ffi.new("VkPipelineColorBlendAttachmentState[1]")
     ffi.fill(colorBlendAttachment, ffi.sizeof(colorBlendAttachment))
