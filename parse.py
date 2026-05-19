@@ -39,12 +39,6 @@ TARGET_FUNCTIONS = {
     # Graphics/Rendering specific
     "vkCmdBeginRendering", "vkCmdDraw", "vkCmdEndRendering",
 
-    # EXT Extended Dynamic States
-    "vkCmdSetCullModeEXT",
-    "vkCmdSetDepthTestEnableEXT",
-    "vkCmdSetDepthWriteEnableEXT",
-    "vkCmdSetDepthCompareOpEXT",
-
     # Swapchain & Sync
     "vkCreateSemaphore", "vkDestroySemaphore", "vkRenderingAttachementInfoKHR",
     "vkAcquireNextImageKHR", "vkCreateSwapchainKHR", "vkDestroySwapchainKHR", "vkQueuePresentKHR",
@@ -55,7 +49,6 @@ TARGET_FUNCTIONS = {
 
 TARGET_STRUCTS = {
     "VkPhysicalDeviceDynamicRenderingFeatures",
-    "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT",
     "VkImageCreateInfo",
     "VkMemoryAllocateInfo",
     "VkPipelineShaderStageCreateInfo",
@@ -107,43 +100,18 @@ def generate_lua_ffi_cdef(xml_path):
     ffi_declarations.append("\n// --- Enum Values ---")
     ffi_declarations.append("enum {")
 
-    # 1. Grab Core Enums
+    # Find all enum groups that are actual enums (not bitmasks)
     for enums_node in root.findall('.//enums[@type="enum"]'):
         for enum_tag in enums_node.findall('enum'):
             name = enum_tag.get('name')
             value = enum_tag.get('value')
+
+            # Some Vulkan enums use aliases instead of values, so we check for both
             if not value:
                 value = enum_tag.get('alias')
+
             if name and value:
                 ffi_declarations.append(f"    {name} = {value},")
-
-    # 2. Grab Extension & Feature Enums (THE MAGIC NUMBER KILLER)
-    # Process <feature> tags first, then <extension> tags so aliases work!
-    for parent_node in root.findall('.//feature') + root.findall('.//extension'):
-        parent_extnumber = parent_node.get('number')
-
-        for ext_node in parent_node.findall('.//require/enum[@extends]'):
-            name = ext_node.get('name')
-            value = ext_node.get('value')
-            alias = ext_node.get('alias')
-            offset = ext_node.get('offset')
-            dir = ext_node.get('dir')
-
-            # An enum can override the parent's extnumber
-            actual_extnumber = ext_node.get('extnumber')
-            if not actual_extnumber and parent_node.tag == 'extension':
-                actual_extnumber = parent_extnumber
-
-            if value:
-                ffi_declarations.append(f"    {name} = {value},")
-            elif alias:
-                ffi_declarations.append(f"    {name} = {alias},")
-            elif offset and actual_extnumber:
-                ext_base = 1000000000 + (int(actual_extnumber) - 1) * 1000
-                calc_val = ext_base + int(offset)
-                if dir == '-':
-                    calc_val = -calc_val
-                ffi_declarations.append(f"    {name} = {calc_val},")
 
     ffi_declarations.append("};")
     # 1. Grab Handles
