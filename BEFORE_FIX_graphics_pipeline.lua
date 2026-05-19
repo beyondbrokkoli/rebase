@@ -97,91 +97,75 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     shaderStages[0].sType = 18; shaderStages[0].stage = 1; shaderStages[0].module = pVertModule[0]; shaderStages[0].pName = "main"
     shaderStages[1].sType = 18; shaderStages[1].stage = 16; shaderStages[1].module = pFragModule[0]; shaderStages[1].pName = "main"
 
-    -- 1. Vertex Input & Assembly
     local vertexInputInfo = ffi.new("VkPipelineVertexInputStateCreateInfo")
-    ffi.fill(vertexInputInfo, ffi.sizeof(vertexInputInfo))
-    vertexInputInfo.sType = 19
+    ffi.fill(vertexInputInfo, ffi.sizeof(vertexInputInfo)); vertexInputInfo.sType = 19
 
     local inputAssembly = ffi.new("VkPipelineInputAssemblyStateCreateInfo")
-    ffi.fill(inputAssembly, ffi.sizeof(inputAssembly))
-    inputAssembly.sType = 20
-    inputAssembly.topology = 3 -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST (Static baseline)
+    ffi.fill(inputAssembly, ffi.sizeof(inputAssembly)); inputAssembly.sType = 20; inputAssembly.topology = 3
 
-    -- 2. Viewport & Scissor (Placeholder, driven by dynamic state)
     local viewportState = ffi.new("VkPipelineViewportStateCreateInfo")
-    ffi.fill(viewportState, ffi.sizeof(viewportState))
-    viewportState.sType = 22
-    viewportState.viewportCount = 1
-    viewportState.scissorCount = 1
+    ffi.fill(viewportState, ffi.sizeof(viewportState)); viewportState.sType = 22; viewportState.viewportCount = 1; viewportState.scissorCount = 1
 
-    -- 3. Rasterizer (Valid static defaults, will be overridden dynamically)
+    -- 1. Rasterizer: Set a VALID static default, NOT zero.
     local rasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo")
     ffi.fill(rasterizer, ffi.sizeof(rasterizer))
     rasterizer.sType = 23
     rasterizer.polygonMode = 0 -- VK_POLYGON_MODE_FILL
     rasterizer.lineWidth = 1.0
-    rasterizer.cullMode = 2    -- VK_CULL_MODE_BACK_BIT 
-    rasterizer.frontFace = 1   -- VK_FRONT_FACE_COUNTER_CLOCKWISE
 
-    -- 4. Depth Stencil (Valid static defaults, will be overridden dynamically)
+    -- SET THESE TO VALID DEFAULTS. Dynamic state will overwrite them anyway.
+    rasterizer.cullMode = 1 -- VK_CULL_MODE_FRONT_BIT (Something valid!)
+    rasterizer.frontFace = 1 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+
+    -- 2. DepthStencil: Set VALID static defaults.
     local depthStencil = ffi.new("VkPipelineDepthStencilStateCreateInfo")
     ffi.fill(depthStencil, ffi.sizeof(depthStencil))
     depthStencil.sType = 25
+
+    -- SET THESE TO VALID DEFAULTS.
     depthStencil.depthTestEnable = 1
     depthStencil.depthWriteEnable = 1
     depthStencil.depthCompareOp = 1 -- VK_COMPARE_OP_LESS
 
-    -- 5. Multisample & Color Blend
     local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo")
-    ffi.fill(multisampling, ffi.sizeof(multisampling))
-    multisampling.sType = 24
-    multisampling.rasterizationSamples = 1
+    ffi.fill(multisampling, ffi.sizeof(multisampling)); multisampling.sType = 24; multisampling.rasterizationSamples = 1
 
     local colorBlendAttachment = ffi.new("VkPipelineColorBlendAttachmentState[1]")
     ffi.fill(colorBlendAttachment, ffi.sizeof(colorBlendAttachment))
-    colorBlendAttachment[0].colorWriteMask = 15
-    colorBlendAttachment[0].blendEnable = 0
+    colorBlendAttachment[0].colorWriteMask = 15; colorBlendAttachment[0].blendEnable = 0
 
     local colorBlending = ffi.new("VkPipelineColorBlendStateCreateInfo")
-    ffi.fill(colorBlending, ffi.sizeof(colorBlending))
-    colorBlending.sType = 26
-    colorBlending.attachmentCount = 1
-    colorBlending.pAttachments = colorBlendAttachment
+    ffi.fill(colorBlending, ffi.sizeof(colorBlending)); colorBlending.sType = 26; colorBlending.attachmentCount = 1; colorBlending.pAttachments = colorBlendAttachment
 
-    -- 6. THE EXHAUSTIVE DYNAMIC STATE REGISTRY (Exactly 8 elements)
-    local dynamicStates = ffi.new("int32_t[8]", {
+    -- === INJECT THE EXHAUSTIVE DYNAMIC STATE ARRAY ===
+    local dynamicStates = ffi.new("int32_t[10]", {
         0,          -- VK_DYNAMIC_STATE_VIEWPORT
         1,          -- VK_DYNAMIC_STATE_SCISSOR
         1000267001, -- VK_DYNAMIC_STATE_CULL_MODE_EXT
         1000267002, -- VK_DYNAMIC_STATE_FRONT_FACE_EXT
-        1000267003, -- VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT
         1000267007, -- VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT
         1000267008, -- VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT
-        1000267009  -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
+        1000267009, -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
+        1000377004, -- VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE_EXT
+        1000267000, -- VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT_EXT
+        1000267003  -- VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT_EXT
     })
 
-    local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo")
-    ffi.fill(dynamicStateInfo, ffi.sizeof(dynamicStateInfo))
-    dynamicStateInfo.sType = 27
-    dynamicStateInfo.dynamicStateCount = 8
-    dynamicStateInfo.pDynamicStates = dynamicStates
+    local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo", {
+        sType = 27,
+        dynamicStateCount = 6,
+        pDynamicStates = dynamicStates
+    })
 
-    -- 7. Pipeline Rendering Info (Vulkan 1.3 Dynamic Rendering)
     local colorFormats = ffi.new("int32_t[1]", {colorFormat})
     local pipelineRenderingInfo = ffi.new("VkPipelineRenderingCreateInfo")
     ffi.fill(pipelineRenderingInfo, ffi.sizeof(pipelineRenderingInfo))
-    pipelineRenderingInfo.sType = 1000044002
-    pipelineRenderingInfo.colorAttachmentCount = 1
-    pipelineRenderingInfo.pColorAttachmentFormats = colorFormats
-    pipelineRenderingInfo.depthAttachmentFormat = 126
+    pipelineRenderingInfo.sType = 1000044002; pipelineRenderingInfo.colorAttachmentCount = 1; pipelineRenderingInfo.pColorAttachmentFormats = colorFormats; pipelineRenderingInfo.depthAttachmentFormat = 126
 
-    -- 8. Final Assembly
     local pipelineInfo = ffi.new("VkGraphicsPipelineCreateInfo[1]")
     ffi.fill(pipelineInfo, ffi.sizeof(pipelineInfo))
-    pipelineInfo[0].sType = 28
-    pipelineInfo[0].pNext = pipelineRenderingInfo
-    pipelineInfo[0].stageCount = 2
-    pipelineInfo[0].pStages = shaderStages
+    pipelineInfo[0].sType = 28; pipelineInfo[0].pNext = pipelineRenderingInfo
+    pipelineInfo[0].stageCount = 2; pipelineInfo[0].pStages = shaderStages
     pipelineInfo[0].pVertexInputState = vertexInputInfo
     pipelineInfo[0].pInputAssemblyState = inputAssembly
     pipelineInfo[0].pViewportState = viewportState
@@ -189,7 +173,7 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     pipelineInfo[0].pMultisampleState = multisampling
     pipelineInfo[0].pDepthStencilState = depthStencil
     pipelineInfo[0].pColorBlendState = colorBlending
-    pipelineInfo[0].pDynamicState = dynamicStateInfo
+    pipelineInfo[0].pDynamicState = dynamicStateInfo -- Bind the dynamic override
     pipelineInfo[0].layout = pipelineLayout
 
     local pPipeline = ffi.new("VkPipeline[1]")
