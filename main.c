@@ -296,64 +296,55 @@ typedef struct {
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
-typedef struct {
-    uint64_t pipeline_id;
-    uint64_t descriptor_set;
-    uint32_t index_count;
-    uint32_t instance_count;
-    uint32_t first_index;
-    int32_t  vertex_offset;
-    uint32_t first_instance;
-    uint32_t _pad_cmd;
-    uint8_t  push_constants[128];
-
-    int16_t  scissor_x;
-    int16_t  scissor_y;
-    uint16_t scissor_w;
-    uint16_t scissor_h;
-    uint8_t  cull_mode;
-    uint8_t  front_face;
-    uint8_t  depth_test;
-    uint8_t  depth_write;
-    uint8_t  depth_compare;
-    uint8_t  topology;        // <-- ADD THIS
-    uint8_t  _pad0[2];        // <-- CHANGED to 2 to align to 4 bytes
-    uint32_t viewport_scale_id;
-    uint8_t  _padding[4];
+/* ===== DRAW COMMAND - Explicit packing for ABI safety ===== */
+typedef struct __attribute__((packed, aligned(8))) {
+    uint64_t pipeline_id;           /* 0   */
+    uint64_t descriptor_set;        /* 8   */
+    uint32_t index_count;           /* 16  */
+    uint32_t instance_count;        /* 20  */
+    uint32_t first_index;           /* 24  */
+    int32_t  vertex_offset;         /* 28  */
+    uint32_t first_instance;        /* 32  */
+    uint32_t _pad_cmd;              /* 36  */
+    uint8_t  push_constants[128];   /* 40  */
+    int16_t  scissor_x;             /* 168 */
+    int16_t  scissor_y;             /* 170 */
+    uint16_t scissor_w;             /* 172 */
+    uint16_t scissor_h;             /* 174 */
+    uint8_t  cull_mode;             /* 176 */
+    uint8_t  front_face;            /* 177 */
+    uint8_t  depth_test;            /* 178 */
+    uint8_t  depth_write;           /* 179 */
+    uint8_t  depth_compare;         /* 180 */
+    uint8_t  topology;              /* 181 */
+    uint8_t  _pad0[2];              /* 182 - CRITICAL: ensures uint32_t alignment */
+    uint32_t viewport_scale_id;     /* 184 - Now guaranteed aligned even with packed */
+    uint8_t  _padding[4];           /* 188 */
 } DrawCommand;
-_Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
+_Static_assert(sizeof(DrawCommand) == 192, "DrawCommand size mismatch");
 
-// Packed is safe here because we manually aligned the pointer to offset 96.
+/* ===== RENDER PACKET - MUST match packed+aligned(64) in BOTH languages ===== */
 typedef struct __attribute__((packed, aligned(64))) {
-    uint64_t comp_pipeline;    // 8 bytes
-    uint64_t comp_layout;      // 8 bytes
-    uint64_t comp_desc_set;    // 8 bytes
-    uint64_t gfx_layout;       // 8 bytes
-    uint64_t vertex_buffer;    // 8 bytes
-    uint64_t index_buffer;     // 8 bytes
-    uint64_t swapchain_image;  // 8 bytes
-    uint64_t swapchain_view;   // 8 bytes
-    uint64_t depth_image;      // 8 bytes
-    uint64_t depth_view;       // 8 bytes
-                               // --- Subtotal: 80 bytes
-
-    uint32_t width;            // 4 bytes
-    uint32_t height;           // 4 bytes
-    uint32_t draw_count;       // 4 bytes
-    uint32_t _pad_ptr;         // 4 bytes (CRITICAL: Aligns pointer to 96)
-                               // --- Subtotal: 96 bytes
-
-    DrawCommand* draw_queue;   // 8 bytes (Properly aligned to 8-byte boundary)
-                               // --- Subtotal: 104 bytes
-
-    uint8_t comp_pc_payload[128]; // 128 bytes
-                               // --- Subtotal: 232 bytes
-
-    uint8_t _padding[24];      // 24 bytes (Rounds out the 4th cache line)
-                               // --- TOTAL: 256 bytes
-} RenderPacket;
-
-_Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 bytes!");
+    uint64_t comp_pipeline;         /* 0   */
+    uint64_t comp_layout;           /* 8   */
+    uint64_t comp_desc_set;         /* 16  */
+    uint64_t gfx_layout;            /* 24  */
+    uint64_t vertex_buffer;         /* 32  */
+    uint64_t index_buffer;          /* 40  */
+    uint64_t swapchain_image;       /* 48  */
+    uint64_t swapchain_view;        /* 56  */
+    uint64_t depth_image;           /* 64  */
+    uint64_t depth_view;            /* 72  */
+    uint32_t width;                 /* 80  */
+    uint32_t height;                /* 84  */
+    uint32_t draw_count;            /* 88  */
+    uint32_t _pad_ptr;              /* 92  */
+    DrawCommand* draw_queue;        /* 96  - pointer, 8 bytes on 64-bit */
+    uint8_t  comp_pc_payload[128];  /* 104 */
+    uint8_t  _padding[24];          /* 232 */
+} RenderPacket;                     /* 256 total, 64-byte aligned */
+_Static_assert(sizeof(RenderPacket) == 256, "RenderPacket size mismatch");
+_Static_assert(_Alignof(RenderPacket) == 64, "RenderPacket alignment mismatch");
 
 typedef struct {
     VkDevice device;

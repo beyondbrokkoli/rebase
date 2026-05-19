@@ -91,7 +91,8 @@ ffi.cdef[[
         uint32_t _padding[3];
     } SwarmCommand;
 
-    typedef struct {
+    // Structs
+    typedef struct __attribute__((packed, aligned(8))) {
         uint64_t pipeline_id;
         uint64_t descriptor_set;
         uint32_t index_count;
@@ -101,7 +102,6 @@ ffi.cdef[[
         uint32_t first_instance;
         uint32_t _pad_cmd;
         uint8_t  push_constants[128];
-
         int16_t  scissor_x;
         int16_t  scissor_y;
         uint16_t scissor_w;
@@ -133,8 +133,8 @@ ffi.cdef[[
         uint32_t draw_count;
         uint32_t _pad_ptr;
         DrawCommand* draw_queue;
-        uint8_t comp_pc_payload[128];
-        uint8_t _padding[24];
+        uint8_t  comp_pc_payload[128];
+        uint8_t  _padding[24];
     } RenderPacket;
 
     typedef struct {
@@ -181,6 +181,14 @@ ffi.cdef[[
     void Sleep(uint32_t dwMilliseconds);
     int usleep(uint32_t usec);
 ]]
+-- THE ABI SAFETY NET
+assert(ffi.sizeof("DrawCommand") == 192, "FATAL: DrawCommand ABI rupture!")
+assert(ffi.sizeof("RenderPacket") == 256, "FATAL: RenderPacket ABI rupture!")
+assert(ffi.alignof("RenderPacket") == 64, "FATAL: RenderPacket Alignment rupture!")
+
+local _test_rp = ffi.new("RenderPacket")
+assert(ffi.offsetof(_test_rp, "draw_queue") == 96, "FATAL: draw_queue pointer shifted!")
+assert(ffi.offsetof(_test_rp, "comp_pc_payload") == 104, "FATAL: Payload offset shifted!")
 
 local function sys_sleep(ms)
     if jit.os == "Windows" then
