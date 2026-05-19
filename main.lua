@@ -106,12 +106,14 @@ ffi.cdef[[
         int16_t  scissor_y;
         uint16_t scissor_w;
         uint16_t scissor_h;
-        uint8_t  cull_mode;         // VkCullModeFlags
-        uint8_t  depth_test;        // VkBool32
-        uint8_t  depth_write;       // VkBool32
-        uint8_t  depth_compare;     // VkCompareOp
-        uint32_t viewport_scale_id; // Maps to array/scale
-        uint8_t  _padding[8];       // Maintains 192 bytes
+        uint8_t  cull_mode;
+        uint8_t  front_face;
+        uint8_t  depth_test;
+        uint8_t  depth_write;
+        uint8_t  depth_compare;
+        uint8_t  _pad0[3];          // Explicitly align to 4-byte boundary
+        uint32_t viewport_scale_id;
+        uint8_t  _padding[4];       // Adjusting to reach 192
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
@@ -152,6 +154,7 @@ ffi.cdef[[
         void* pfnEnd;
 
         void* pfnSetCullMode;
+        void* pfnSetFrontFace;
         void* pfnSetDepthTestEnable;
         void* pfnSetDepthWriteEnable;
         void* pfnSetDepthCompareOp;

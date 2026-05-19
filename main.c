@@ -306,17 +306,19 @@ typedef struct {
     uint32_t first_instance;
     uint32_t _pad_cmd;
     uint8_t  push_constants[128];
-    // -- THE DYNAMIC HEADER --
+
     int16_t  scissor_x;
     int16_t  scissor_y;
     uint16_t scissor_w;
     uint16_t scissor_h;
     uint8_t  cull_mode;
+    uint8_t  front_face;
     uint8_t  depth_test;
     uint8_t  depth_write;
     uint8_t  depth_compare;
+    uint8_t  _pad0[3];          // Explicitly align to 4-byte boundary
     uint32_t viewport_scale_id;
-    uint8_t  _padding[8];
+    uint8_t  _padding[4];       // Adjusting to reach 192
 } DrawCommand;
 _Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
 
@@ -369,6 +371,7 @@ typedef struct {
     void* pfnBegin;
     void* pfnEnd;
     void* pfnSetCullMode;
+    void* pfnSetFrontFace;
     void* pfnSetDepthTestEnable;
     void* pfnSetDepthWriteEnable;
     void* pfnSetDepthCompareOp;
@@ -376,6 +379,7 @@ typedef struct {
 
 // Vulkan Extended Dynamic State PFNs
 typedef void (VKAPI_PTR *PFN_vkCmdSetCullMode)(VkCommandBuffer, VkCullModeFlags);
+typedef void (VKAPI_PTR *PFN_vkCmdSetFrontFace)(VkCommandBuffer, VkFrontFace);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthTestEnable)(VkCommandBuffer, VkBool32);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthWriteEnable)(VkCommandBuffer, VkBool32);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOp)(VkCommandBuffer, VkCompareOp);
