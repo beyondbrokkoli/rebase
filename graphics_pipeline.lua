@@ -124,12 +124,12 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
 
     -- === INJECT EXTENDED DYNAMIC STATES (BULLETPROOF) ===
     local dynamicStates = ffi.new("int32_t[6]", {
-        ffi.C.VK_DYNAMIC_STATE_VIEWPORT,
-        ffi.C.VK_DYNAMIC_STATE_SCISSOR,
-        ffi.C.VK_DYNAMIC_STATE_CULL_MODE_EXT,
-        ffi.C.VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT,
-        ffi.C.VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT,
-        ffi.C.VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
+        0,
+        1000267004,
+        1000267000,
+        1000267006,
+        1000267007,
+        1000267008,
     });
 
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo", {
