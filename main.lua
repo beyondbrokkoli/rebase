@@ -45,9 +45,12 @@ else
 end
 
 ffi.cdef[[
+    // Core Engine Control
     int vibe_get_is_running();
     void vibe_trigger_shutdown();
     void vibe_mark_lua_finished();
+    
+    // GLFW Bridge
     const char** vibe_get_glfw_extensions(uint32_t* count);
     void vibe_publish_vk_instance(void* instance);
     void* vibe_get_vk_surface();
@@ -59,46 +62,36 @@ ffi.cdef[[
     int vibe_get_resize_flag();
     void vibe_get_window_size(int* w, int* h);
 
+    // Math & Types
+    typedef struct { float m[16]; } mat4_t;
+
+    // Structs
     typedef struct {
-        mat4_t viewProj;           // Offset 0 (64 bytes)
-        uint32_t pos_x_idx;        // Offset 64 (4 bytes)
-        uint32_t pos_y_idx;        // Offset 68 (4 bytes)
-        uint32_t pos_z_idx;        // Offset 72 (4 bytes)
-        uint32_t particle_count;   // Offset 76 (4 bytes)
-        float dt;                  // Offset 80 (4 bytes)
+        mat4_t viewProj;
+        uint32_t pos_x_idx;
+        uint32_t pos_y_idx;
+        uint32_t pos_z_idx;
+        uint32_t particle_count;
+        float dt;
+        uint32_t vel_x_idx;
+        uint32_t vel_y_idx;
+        uint32_t vel_z_idx;
+        uint32_t target_state;
+        uint32_t push_active;
+        uint32_t pull_active;
+        float mouse_x;
+        float mouse_y;
+        uint32_t _padding[3];
+    } PushConstants;
 
-        uint32_t vel_x_idx;        // Offset 84
-        uint32_t vel_y_idx;        // Offset 88
-        uint32_t vel_z_idx;        // Offset 92
-        uint32_t target_state;     // Offset 96
-        uint32_t push_active;      // Offset 100
-        uint32_t pull_active;      // Offset 104
-        float mouse_x;             // Offset 108
-        float mouse_y;             // Offset 112
-        uint32_t _padding[3];      // Remaining 12 bytes untouched
-    } PushConstants;               // Total: 128 bytes
-
-    // WSI Bridge Struct
     typedef struct {
-        VkDevice device;
-        VkQueue queue;
-        VkSwapchainKHR swapchain;
-        uint64_t swapchain_images[10];
-        uint64_t swapchain_views[10];
-        VkSemaphore image_available[3];
-        VkSemaphore render_finished[10];
-        VkFence in_flight[3];
-        void* vkWaitForFences;
-        void* vkAcquireNextImageKHR;
-        void* vkResetFences;
-        void* vkQueueSubmit;
-        void* vkQueuePresentKHR;
-        void* pfnBegin;
-        void* pfnEnd;
-    } RenderThreadInit;
-
-    void vmath_init_workers(int num_threads);
-    void vmath_destroy_workers();
+        uint32_t target_state;
+        uint32_t push_active;
+        uint32_t pull_active;
+        float mouse_x;
+        float mouse_y;
+        uint32_t _padding[3];
+    } SwarmCommand;
 
     typedef struct {
         uint64_t pipeline_id;
@@ -108,37 +101,52 @@ ffi.cdef[[
         uint32_t first_vertex;
         uint32_t first_instance;
         uint8_t  push_constants[128];
-        uint8_t _padding[32];
+        uint8_t  _padding[32];
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
-        uint64_t comp_pipeline;     // 8 bytes
-        uint64_t comp_layout;       // 8 bytes
-        uint64_t comp_desc_set;     // 8 bytes
-        uint64_t gfx_layout;        // 8 bytes
-        uint64_t vertex_buffer;     // 8 bytes
-        uint64_t index_buffer;      // 8 bytes
-        uint64_t swapchain_image;   // 8 bytes
-        uint64_t swapchain_view;    // 8 bytes
-        uint64_t depth_image;       // 8 bytes
-        uint64_t depth_view;        // 8 bytes
-                                    // --- Subtotal: 80 bytes
-
-        uint32_t width;             // 4 bytes
-        uint32_t height;            // 4 bytes
-        uint32_t draw_count;        // 4 bytes
-        uint32_t _pad_ptr;          // 4 bytes (CRITICAL: Aligns the pointer to 96!)
-                                    // --- Subtotal: 96 bytes
-
-        DrawCommand* draw_queue;    // 8 bytes (Properly aligned to an 8-byte boundary)
-                                    // --- Subtotal: 104 bytes
-
-        uint8_t comp_pc_payload[128]; // 128 bytes
-                                      // --- Subtotal: 232 bytes
-
-        uint8_t _padding[24];       // 24 bytes (Perfectly rounds out the cache line)
-                                    // --- TOTAL: 256 bytes (Exactly 4x 64-byte lines)
+        uint64_t comp_pipeline;
+        uint64_t comp_layout;
+        uint64_t comp_desc_set;
+        uint64_t gfx_layout;
+        uint64_t vertex_buffer;
+        uint64_t index_buffer;
+        uint64_t swapchain_image;
+        uint64_t swapchain_view;
+        uint64_t depth_image;
+        uint64_t depth_view;
+        uint32_t width;
+        uint32_t height;
+        uint32_t draw_count;
+        uint32_t _pad_ptr;
+        DrawCommand* draw_queue;
+        uint8_t comp_pc_payload[128];
+        uint8_t _padding[24];
     } RenderPacket;
+
+    // WSI Bridge
+    typedef struct {
+        void* device;      // FFI doesn't need strict Vk Types here if passed as pointers
+        void* queue;
+        void* swapchain;
+        uint64_t swapchain_images[10];
+        uint64_t swapchain_views[10];
+        void* image_available[3];
+        void* render_finished[10];
+        void* in_flight[3];
+        void* vkWaitForFences;
+        void* vkAcquireNextImageKHR;
+        void* vkResetFences;
+        void* vkQueueSubmit;
+        void* vkQueuePresentKHR;
+        void* pfnBegin;
+        void* pfnEnd;
+    } RenderThreadInit;
+
+    // Subsystem Interfaces
+    void vmath_init_workers(int num_threads);
+    void vmath_destroy_workers();
+    void vmath_dispatch_swarm(int count, float* px, float* py, float* pz, float* vx, float* vy, float* vz, float* seed, const SwarmCommand* cmd, float time, float dt, float gravity, float blend_metal, float blend_paradox);
 
     void vibe_stream_positions(int count, float* c_px, float* c_py, float* c_pz, float* g_px, float* g_py, float* g_pz);
     int vibe_ring_get_write_idx();
@@ -150,27 +158,8 @@ ffi.cdef[[
     int vibe_get_mouse_btn(int btn);
     int vibe_get_spacebar();
 
-    typedef struct {
-        uint32_t target_state;
-        uint32_t push_active;
-        uint32_t pull_active;
-        float mouse_x;
-        float mouse_y;
-        uint32_t _padding[3];
-    } SwarmCommand;
-
-    void vmath_dispatch_swarm(
-        int count,
-        float* px, float* py, float* pz,
-        float* vx, float* vy, float* vz,
-        float* seed,
-        const SwarmCommand* cmd,
-        float time, float dt, float gravity,
-        float blend_metal, float blend_paradox
-    );
-
-    void Sleep(uint32_t dwMilliseconds); // Windows
-    int usleep(uint32_t usec);           // Linux
+    void Sleep(uint32_t dwMilliseconds);
+    int usleep(uint32_t usec);
 ]]
 
 local function sys_sleep(ms)

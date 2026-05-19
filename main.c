@@ -266,38 +266,96 @@ void glfw_framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 EXPORT int vibe_get_spacebar() {
     return atomic_load_explicit(&g_engine.mailbox.key_space, memory_order_acquire);
 }
-// ==============================================================================
-// NATIVE C-CORE RENDER BINDINGS
-// ==============================================================================
-
+// ==========================================
+// MATHEMATICS & COMMAND STRUCTS
+// ==========================================
 typedef struct {
     float m[16];
 } mat4_t;
 
 typedef struct {
-    mat4_t viewProj;           // Offset 0 (64 bytes)
-    uint32_t pos_x_idx;        // Offset 64 (4 bytes)
-    uint32_t pos_y_idx;        // Offset 68 (4 bytes)
-    uint32_t pos_z_idx;        // Offset 72 (4 bytes)
-    uint32_t particle_count;   // Offset 76 (4 bytes)
-    float dt;                  // Offset 80 (4 bytes)
+    mat4_t viewProj;           // Offset 0   (64 bytes)
+    uint32_t pos_x_idx;        // Offset 64  (4 bytes)
+    uint32_t pos_y_idx;        // Offset 68  (4 bytes)
+    uint32_t pos_z_idx;        // Offset 72  (4 bytes)
+    uint32_t particle_count;   // Offset 76  (4 bytes)
+    float dt;                  // Offset 80  (4 bytes)
 
     // -- COMPUTATIONAL SWARM PAYLOAD --
-    uint32_t vel_x_idx;        // Offset 84 (4 bytes)
-    uint32_t vel_y_idx;        // Offset 88 (4 bytes)
-    uint32_t vel_z_idx;        // Offset 92 (4 bytes)
-    uint32_t target_state;     // Offset 96 (4 bytes)
+    uint32_t vel_x_idx;        // Offset 84  (4 bytes)
+    uint32_t vel_y_idx;        // Offset 88  (4 bytes)
+    uint32_t vel_z_idx;        // Offset 92  (4 bytes)
+    uint32_t target_state;     // Offset 96  (4 bytes)
     uint32_t push_active;      // Offset 100 (4 bytes)
     uint32_t pull_active;      // Offset 104 (4 bytes)
     float mouse_x;             // Offset 108 (4 bytes)
     float mouse_y;             // Offset 112 (4 bytes)
 
-    uint32_t _padding[3];      // Offset 116 (12 bytes explicit padding to reach 128)
-} PushConstants;               // Total: Exactly 128 bytes
+    uint32_t _padding[3];      // Offset 116 (12 bytes)
+} PushConstants;               // TOTAL: 128 Bytes (Perfect)
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
-// WSI Bridge Struct
+typedef struct {
+    uint32_t target_state;     // 4 bytes
+    uint32_t push_active;      // 4 bytes
+    uint32_t pull_active;      // 4 bytes
+    float mouse_x;             // 4 bytes
+    float mouse_y;             // 4 bytes
+    uint32_t _padding[3];      // 12 bytes
+} SwarmCommand;                // TOTAL: 32 bytes
+
+// ==========================================
+// DATA-ORIENTED RENDER QUEUE STRUCTS
+// ==========================================
+typedef struct {
+    uint64_t pipeline_id;      // 8 bytes
+    uint64_t descriptor_set;   // 8 bytes
+    uint32_t vertex_count;     // 4 bytes
+    uint32_t instance_count;   // 4 bytes
+    uint32_t first_vertex;     // 4 bytes
+    uint32_t first_instance;   // 4 bytes
+    uint8_t  push_constants[128]; // 128 bytes
+    uint8_t  _padding[32];     // 32 bytes padding to hit 192
+} DrawCommand;                 // TOTAL: 192 Bytes (Exactly 3 Cache Lines)
+
+_Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
+
+// Packed is safe here because we manually aligned the pointer to offset 96.
+typedef struct __attribute__((packed, aligned(64))) {
+    uint64_t comp_pipeline;    // 8 bytes
+    uint64_t comp_layout;      // 8 bytes
+    uint64_t comp_desc_set;    // 8 bytes
+    uint64_t gfx_layout;       // 8 bytes
+    uint64_t vertex_buffer;    // 8 bytes
+    uint64_t index_buffer;     // 8 bytes
+    uint64_t swapchain_image;  // 8 bytes
+    uint64_t swapchain_view;   // 8 bytes
+    uint64_t depth_image;      // 8 bytes
+    uint64_t depth_view;       // 8 bytes
+                               // --- Subtotal: 80 bytes
+
+    uint32_t width;            // 4 bytes
+    uint32_t height;           // 4 bytes
+    uint32_t draw_count;       // 4 bytes
+    uint32_t _pad_ptr;         // 4 bytes (CRITICAL: Aligns pointer to 96)
+                               // --- Subtotal: 96 bytes
+
+    DrawCommand* draw_queue;   // 8 bytes (Properly aligned to 8-byte boundary)
+                               // --- Subtotal: 104 bytes
+
+    uint8_t comp_pc_payload[128]; // 128 bytes
+                               // --- Subtotal: 232 bytes
+
+    uint8_t _padding[24];      // 24 bytes (Rounds out the 4th cache line)
+                               // --- TOTAL: 256 bytes
+} RenderPacket;
+
+_Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 bytes!");
+
+// ==========================================
+// C-ONLY SYNCHRONIZATION (HIDDEN FROM LUA)
+// ==========================================
 typedef struct {
     VkDevice device;
     VkQueue queue;
@@ -315,56 +373,14 @@ typedef struct {
     void* pfnBegin;
     void* pfnEnd;
 } RenderThreadInit;
-typedef struct {
-    uint64_t pipeline_id;
-    uint64_t descriptor_set;
-    uint32_t vertex_count;
-    uint32_t instance_count;
-    uint32_t first_vertex;
-    uint32_t first_instance;
-    uint8_t  push_constants[128];
-    uint8_t _padding[32];
-} DrawCommand;
 
-typedef struct __attribute__((packed, aligned(64))) {
-    uint64_t comp_pipeline;     // 8 bytes
-    uint64_t comp_layout;       // 8 bytes
-    uint64_t comp_desc_set;     // 8 bytes
-    uint64_t gfx_layout;        // 8 bytes
-    uint64_t vertex_buffer;     // 8 bytes
-    uint64_t index_buffer;      // 8 bytes
-    uint64_t swapchain_image;   // 8 bytes
-    uint64_t swapchain_view;    // 8 bytes
-    uint64_t depth_image;       // 8 bytes
-    uint64_t depth_view;        // 8 bytes
-                                // --- Subtotal: 80 bytes
-
-    uint32_t width;             // 4 bytes
-    uint32_t height;            // 4 bytes
-    uint32_t draw_count;        // 4 bytes
-    uint32_t _pad_ptr;          // 4 bytes (CRITICAL: Aligns the pointer to 96!)
-                                // --- Subtotal: 96 bytes
-
-    DrawCommand* draw_queue;    // 8 bytes (Properly aligned to an 8-byte boundary)
-                                // --- Subtotal: 104 bytes
-
-    uint8_t comp_pc_payload[128]; // 128 bytes
-                                // --- Subtotal: 232 bytes
-
-    uint8_t _padding[24];       // 24 bytes (Perfectly rounds out the cache line)
-                                // --- TOTAL: 256 bytes (Exactly 4x 64-byte lines)
-} RenderPacket;
-
-// The Triad Topology
 typedef struct {
     alignas(64) RenderPacket packets[3];
     alignas(64) _Atomic int ready_idx;
     alignas(64) _Atomic int read_idx;
 } RenderRing;
-static RenderRing g_ring = {
-    .ready_idx = -1,
-    .read_idx = -1
-};
+
+static RenderRing g_ring = { .ready_idx = -1, .read_idx = -1 };
 static RenderThreadInit g_wsi;
 static vmath_thread_t g_render_thread;
 static atomic_int g_render_thread_active = 0;
