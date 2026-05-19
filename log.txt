@@ -4,4 +4,3 @@ SEVERITY: 4096
 MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
 The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
 
-
