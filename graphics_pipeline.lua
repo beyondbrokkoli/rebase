@@ -17,9 +17,73 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local device = core_state.device
     local physDevice = core_state.physicalDevice
 
-    -- [Depth Buffer Allocation Omitted for Brevity - Remains Unchanged] --
-    local dImgInfo = ffi.new("VkImageCreateInfo"); ffi.fill(dImgInfo, ffi.sizeof(dImgInfo)); dImgInfo.sType = 14; dImgInfo.imageType = 1; dImgInfo.extent.width = width; dImgInfo.extent.height = height; dImgInfo.extent.depth = 1; dImgInfo.mipLevels = 1; dImgInfo.arrayLayers = 1; dImgInfo.format = 126; dImgInfo.tiling = 0; dImgInfo.initialLayout = 0; dImgInfo.usage = 32; dImgInfo.samples = 1; local pDepthImage = ffi.new("VkImage[1]"); assert(vk.vkCreateImage(device, dImgInfo, nil, pDepthImage) == 0); local depthImage = pDepthImage[0]; local memReqs = ffi.new("VkMemoryRequirements"); vk.vkGetImageMemoryRequirements(device, depthImage, memReqs); local memProperties = ffi.new("VkPhysicalDeviceMemoryProperties"); vk.vkGetPhysicalDeviceMemoryProperties(physDevice, memProperties); local memoryTypeIndex = -1; for i = 0, memProperties.memoryTypeCount - 1 do; local isTypeSupported = bit.band(memReqs.memoryTypeBits, bit.lshift(1, i)) ~= 0; local isVRAM = bit.band(memProperties.memoryTypes[i].propertyFlags, 1) ~= 0; if isTypeSupported and isVRAM then; memoryTypeIndex = i; break; end; end; assert(memoryTypeIndex ~= -1, "FATAL: Could not find VRAM for Depth Buffer!"); local dAllocInfo = ffi.new("VkMemoryAllocateInfo"); ffi.fill(dAllocInfo, ffi.sizeof(dAllocInfo)); dAllocInfo.sType = 5; dAllocInfo.allocationSize = memReqs.size; dAllocInfo.memoryTypeIndex = memoryTypeIndex; local pDepthMemory = ffi.new("VkDeviceMemory[1]"); assert(vk.vkAllocateMemory(device, dAllocInfo, nil, pDepthMemory) == 0); local depthMemory = pDepthMemory[0]; assert(vk.vkBindImageMemory(device, depthImage, depthMemory, 0) == 0); local dViewInfo = ffi.new("VkImageViewCreateInfo"); ffi.fill(dViewInfo, ffi.sizeof(dViewInfo)); dViewInfo.sType = 15; dViewInfo.image = depthImage; dViewInfo.viewType = 1; dViewInfo.format = 126; dViewInfo.subresourceRange.aspectMask = 2; dViewInfo.subresourceRange.levelCount = 1; dViewInfo.subresourceRange.layerCount = 1; local pDepthView = ffi.new("VkImageView[1]"); assert(vk.vkCreateImageView(device, dViewInfo, nil, pDepthView) == 0); local depthImageView = pDepthView[0]
+    -- 1. Create Depth Image (The Z-Buffer)
+    local dImgInfo = ffi.new("VkImageCreateInfo")
+    ffi.fill(dImgInfo, ffi.sizeof(dImgInfo))
+    dImgInfo.sType = 14 -- VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+    dImgInfo.imageType = 1 -- VK_IMAGE_TYPE_2D
+    dImgInfo.extent.width = width
+    dImgInfo.extent.height = height
+    dImgInfo.extent.depth = 1
+    dImgInfo.mipLevels = 1
+    dImgInfo.arrayLayers = 1
+    dImgInfo.format = 126 -- VK_FORMAT_D32_SFLOAT
+    dImgInfo.tiling = 0 -- VK_IMAGE_TILING_OPTIMAL
+    dImgInfo.initialLayout = 0 -- VK_IMAGE_LAYOUT_UNDEFINED
+    dImgInfo.usage = 32 -- VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+    dImgInfo.samples = 1 -- VK_SAMPLE_COUNT_1_BIT
 
+    local pDepthImage = ffi.new("VkImage[1]")
+    assert(vk.vkCreateImage(device, dImgInfo, nil, pDepthImage) == 0)
+    local depthImage = pDepthImage[0]
+
+    -- 2. Allocate VRAM for the Depth Image
+    local memReqs = ffi.new("VkMemoryRequirements")
+    vk.vkGetImageMemoryRequirements(device, depthImage, memReqs)
+
+    local memProperties = ffi.new("VkPhysicalDeviceMemoryProperties")
+    vk.vkGetPhysicalDeviceMemoryProperties(physDevice, memProperties)
+
+    -- Find VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT (1)
+    local memoryTypeIndex = -1
+    for i = 0, memProperties.memoryTypeCount - 1 do
+        local isTypeSupported = bit.band(memReqs.memoryTypeBits, bit.lshift(1, i)) ~= 0
+        local isVRAM = bit.band(memProperties.memoryTypes[i].propertyFlags, 1) ~= 0
+        if isTypeSupported and isVRAM then
+            memoryTypeIndex = i
+            break
+        end
+    end
+    assert(memoryTypeIndex ~= -1, "FATAL: Could not find VRAM for Depth Buffer!")
+
+    local dAllocInfo = ffi.new("VkMemoryAllocateInfo")
+    ffi.fill(dAllocInfo, ffi.sizeof(dAllocInfo))
+    dAllocInfo.sType = 5 -- VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+    dAllocInfo.allocationSize = memReqs.size
+    dAllocInfo.memoryTypeIndex = memoryTypeIndex
+
+    local pDepthMemory = ffi.new("VkDeviceMemory[1]")
+    assert(vk.vkAllocateMemory(device, dAllocInfo, nil, pDepthMemory) == 0)
+    local depthMemory = pDepthMemory[0]
+
+    assert(vk.vkBindImageMemory(device, depthImage, depthMemory, 0) == 0)
+
+    -- 3. Create the Depth Image View
+    local dViewInfo = ffi.new("VkImageViewCreateInfo")
+    ffi.fill(dViewInfo, ffi.sizeof(dViewInfo))
+    dViewInfo.sType = 15 -- VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+    dViewInfo.image = depthImage
+    dViewInfo.viewType = 1 -- VK_IMAGE_VIEW_TYPE_2D
+    dViewInfo.format = 126 -- VK_FORMAT_D32_SFLOAT
+    dViewInfo.subresourceRange.aspectMask = 2 -- VK_IMAGE_ASPECT_DEPTH_BIT
+    dViewInfo.subresourceRange.levelCount = 1
+    dViewInfo.subresourceRange.layerCount = 1
+
+    local pDepthView = ffi.new("VkImageView[1]")
+    assert(vk.vkCreateImageView(device, dViewInfo, nil, pDepthView) == 0)
+    local depthImageView = pDepthView[0]
+
+    -- 4. Load Shader Modules
     local vertCode = ReadShaderFile("render_vert.spv")
     local fragCode = ReadShaderFile("render_frag.spv")
     local vertInfo = ffi.new("VkShaderModuleCreateInfo", { sType = 16, codeSize = string.len(vertCode), pCode = ffi.cast("const uint32_t*", vertCode) })

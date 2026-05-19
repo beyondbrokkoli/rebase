@@ -156,7 +156,7 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
         pNext = dynamicRendering,
         queueCreateInfoCount = 1,
         pQueueCreateInfos = queueCreateInfo,
-        enabledExtensionCount = 7,; -- UPDATED COUNT
+        enabledExtensionCount = 7, -- UPDATED COUNT
         ppEnabledExtensionNames = deviceExtensions,
         pEnabledFeatures = deviceFeatures
     })
