@@ -296,22 +296,28 @@ typedef struct {
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
-// ==========================================
-// DATA-ORIENTED RENDER QUEUE STRUCTS
-// ==========================================
 typedef struct {
     uint64_t pipeline_id;
     uint64_t descriptor_set;
-    uint32_t index_count;       // Swapped from vertex_count
+    uint32_t index_count;
     uint32_t instance_count;
-    uint32_t first_index;       // Swapped from first_vertex
-    int32_t  vertex_offset;     // NEW: Allows us to shift the starting vertex
+    uint32_t first_index;
+    int32_t  vertex_offset;
     uint32_t first_instance;
-    uint32_t _pad_cmd;          // NEW: Keeps the 8-byte alignment perfect
+    uint32_t _pad_cmd;
     uint8_t  push_constants[128];
-    uint8_t  _padding[24];      // Adjusted to keep exactly 192 bytes
+    // -- THE DYNAMIC HEADER --
+    int16_t  scissor_x;
+    int16_t  scissor_y;
+    uint16_t scissor_w;
+    uint16_t scissor_h;
+    uint8_t  cull_mode;
+    uint8_t  depth_test;
+    uint8_t  depth_write;
+    uint8_t  depth_compare;
+    uint32_t viewport_scale_id;
+    uint8_t  _padding[8];
 } DrawCommand;
-
 _Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
 
 // Packed is safe here because we manually aligned the pointer to offset 96.
@@ -346,9 +352,6 @@ typedef struct __attribute__((packed, aligned(64))) {
 
 _Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 bytes!");
 
-// ==========================================
-// C-ONLY SYNCHRONIZATION (HIDDEN FROM LUA)
-// ==========================================
 typedef struct {
     VkDevice device;
     VkQueue queue;
@@ -365,7 +368,17 @@ typedef struct {
     void* vkQueuePresentKHR;
     void* pfnBegin;
     void* pfnEnd;
+    void* pfnSetCullMode;
+    void* pfnSetDepthTestEnable;
+    void* pfnSetDepthWriteEnable;
+    void* pfnSetDepthCompareOp;
 } RenderThreadInit;
+
+// Vulkan Extended Dynamic State PFNs
+typedef void (VKAPI_PTR *PFN_vkCmdSetCullMode)(VkCommandBuffer, VkCullModeFlags);
+typedef void (VKAPI_PTR *PFN_vkCmdSetDepthTestEnable)(VkCommandBuffer, VkBool32);
+typedef void (VKAPI_PTR *PFN_vkCmdSetDepthWriteEnable)(VkCommandBuffer, VkBool32);
+typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOp)(VkCommandBuffer, VkCompareOp);
 
 typedef struct {
     alignas(64) RenderPacket packets[3];
@@ -464,6 +477,7 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         .clearValue.depthStencil = {0.0f, 0}
     };
 
+    // Begin Rendering
     VkRenderingInfoKHR renderInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
         .renderArea.extent = {p->width, p->height},
@@ -472,27 +486,31 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         .pColorAttachments = &colorAttachment,
         .pDepthAttachment = &depthAttachment
     };
-
     pfnBegin(cmd, &renderInfo);
 
-    // 3. Global Graphics State Setup
-    VkViewport viewport = {0.0f, 0.0f, (float)p->width, (float)p->height, 0.0f, 1.0f};
-    VkRect2D scissor = {{0, 0}, {p->width, p->height}};
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
+    // Initial Buffer Binds
     VkDeviceSize offset = 0;
     VkBuffer vbo = (VkBuffer)p->vertex_buffer;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
-
-    // --- BIND THE INDEX BUFFER ---
     VkBuffer ibo = (VkBuffer)p->index_buffer;
-    // VK_INDEX_TYPE_UINT32 because we allocated our MASTER_INDEX_BLOCK as uint32_t
     vkCmdBindIndexBuffer(cmd, ibo, 0, VK_INDEX_TYPE_UINT32);
 
-    // 4. Data-Oriented Queue Execution
-    uint64_t current_pipeline = 0;
-    uint64_t current_descriptor = 0;
+    // Fetch dynamic PFNs from global WSI struct
+    PFN_vkCmdSetCullMode        pfnCull       = (PFN_vkCmdSetCullMode)g_wsi.pfnSetCullMode;
+    PFN_vkCmdSetDepthTestEnable pfnDepthTest  = (PFN_vkCmdSetDepthTestEnable)g_wsi.pfnSetDepthTestEnable;
+    PFN_vkCmdSetDepthWriteEnable pfnDepthWrite = (PFN_vkCmdSetDepthWriteEnable)g_wsi.pfnSetDepthWriteEnable;
+    PFN_vkCmdSetDepthCompareOp  pfnDepthComp  = (PFN_vkCmdSetDepthCompareOp)g_wsi.pfnSetDepthCompareOp;
+
+    // === SHADOW STATE INITIALIZATION ===
+    // Initialized to invalid values to force an update on the first command.
+    uint64_t current_pipeline = ~0ULL;
+    uint64_t current_descriptor = ~0ULL;
+    VkRect2D current_scissor = { {-1, -1}, {0, 0} };
+    uint32_t current_viewport_id = 0xFFFFFFFF;
+    uint8_t  current_cull = 0xFF;
+    uint8_t  current_dtest = 0xFF;
+    uint8_t  current_dwrite = 0xFF;
+    uint8_t  current_dcomp = 0xFF;
 
     for (uint32_t i = 0; i < count; i++) {
         DrawCommand* draw = &queue[i];
@@ -508,15 +526,46 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             current_descriptor = draw->descriptor_set;
         }
 
-        vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
+        // === EVALUATE DYNAMIC STATE DELTAS ===
+        if (draw->scissor_x != current_scissor.offset.x || draw->scissor_y != current_scissor.offset.y ||
+            draw->scissor_w != current_scissor.extent.width || draw->scissor_h != current_scissor.extent.height) {
+            current_scissor.offset.x = draw->scissor_x;
+            current_scissor.offset.y = draw->scissor_y;
+            current_scissor.extent.width = draw->scissor_w;
+            current_scissor.extent.height = draw->scissor_h;
+            vkCmdSetScissor(cmd, 0, 1, &current_scissor);
+        }
 
-        vkCmdDrawIndexed(cmd,
-            draw->index_count,
-            draw->instance_count,
-            draw->first_index,
-            draw->vertex_offset,
-            draw->first_instance
-        );
+        if (draw->viewport_scale_id != current_viewport_id) {
+            // Placeholder: Assume ID 0 = full screen. Expand this logic later for split-screen / UI scaling.
+            VkViewport vp = {0.0f, 0.0f, (float)p->width, (float)p->height, 0.0f, 1.0f};
+            vkCmdSetViewport(cmd, 0, 1, &vp);
+            current_viewport_id = draw->viewport_scale_id;
+        }
+
+        if (pfnCull && draw->cull_mode != current_cull) {
+            pfnCull(cmd, (VkCullModeFlags)draw->cull_mode);
+            current_cull = draw->cull_mode;
+        }
+
+        if (pfnDepthTest && draw->depth_test != current_dtest) {
+            pfnDepthTest(cmd, (VkBool32)draw->depth_test);
+            current_dtest = draw->depth_test;
+        }
+
+        if (pfnDepthWrite && draw->depth_write != current_dwrite) {
+            pfnDepthWrite(cmd, (VkBool32)draw->depth_write);
+            current_dwrite = draw->depth_write;
+        }
+
+        if (pfnDepthComp && draw->depth_compare != current_dcomp) {
+            pfnDepthComp(cmd, (VkCompareOp)draw->depth_compare);
+            current_dcomp = draw->depth_compare;
+        }
+
+        // Execute Draw
+        vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
+        vkCmdDrawIndexed(cmd, draw->index_count, draw->instance_count, draw->first_index, draw->vertex_offset, draw->first_instance);
     }
 
     pfnEnd(cmd);
