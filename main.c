@@ -602,12 +602,11 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
 THREAD_FUNC render_thread_loop(void* arg) {
     printf("[C-CORE] Async Render Thread Online.\n");
 
-    // 1. C-Owned Command Pool Setup
     VkCommandPool cmd_pool;
     VkCommandPoolCreateInfo pool_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = 0 // Assuming Graphics queue index is 0 in your setup
+        .queueFamilyIndex = 0
     };
     vkCreateCommandPool(g_wsi.device, &pool_info, NULL, &cmd_pool);
 
@@ -623,49 +622,60 @@ THREAD_FUNC render_thread_loop(void* arg) {
     uint32_t current_frame = 0;
     int local_read = -1;
 
-    // Typecast Vulkan WSI Pointers
     PFN_vkWaitForFences pfnWait = (PFN_vkWaitForFences)g_wsi.vkWaitForFences;
     PFN_vkAcquireNextImageKHR pfnAcquire = (PFN_vkAcquireNextImageKHR)g_wsi.vkAcquireNextImageKHR;
     PFN_vkResetFences pfnReset = (PFN_vkResetFences)g_wsi.vkResetFences;
     PFN_vkQueueSubmit pfnSubmit = (PFN_vkQueueSubmit)g_wsi.vkQueueSubmit;
     PFN_vkQueuePresentKHR pfnPresent = (PFN_vkQueuePresentKHR)g_wsi.vkQueuePresentKHR;
 
-    while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) &&
+    // FIX 1: Track which fence is protecting which physical swapchain image
+    VkFence images_in_flight[10];
+    for (int i = 0; i < 10; i++) {
+        images_in_flight[i] = VK_NULL_HANDLE;
+    }
+
+    while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) && 
            atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
-        // 2. Triad Consumer Handoff
+
         int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
-        if (ready == -1 || ready == local_read) {
-            SLEEP_MS(1);
-            continue; // Spinlock: Lua hasn't finished a new frame yet
-        }
+        if (ready == -1 || ready == local_read) { SLEEP_MS(1); continue; }
         local_read = ready;
         atomic_store_explicit(&g_ring.read_idx, local_read, memory_order_release);
-
         RenderPacket* p = &g_ring.packets[local_read];
+
         VkCommandBuffer cmd = cmd_buffers[current_frame];
 
-        // 3. WSI Lifecycle
+        // 1. Wait for the CPU frame timeline
         pfnWait(g_wsi.device, 1, &g_wsi.in_flight[current_frame], VK_TRUE, UINT64_MAX);
 
         uint32_t img_idx;
-        VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX,
-                                  g_wsi.image_available[current_frame], VK_NULL_HANDLE, &img_idx);
+        VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX, g_wsi.image_available[current_frame], VK_NULL_HANDLE, &img_idx);
 
-        if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+        // FIX 2: Do NOT 'continue' on out-of-date. It will reuse the semaphore and trigger Error 1.
+        // Instead, suspend the loop and wait for Lua to gracefully kill this thread.
+        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             atomic_store_explicit(&g_engine.mailbox.window_resized, 1, memory_order_release);
-            SLEEP_MS(10);
-            continue;
+            while(atomic_load_explicit(&g_render_thread_active, memory_order_acquire)) {
+                SLEEP_MS(10);
+            }
+            break; 
         }
+
+        // FIX 3: If the compositor gave us an image that is STILL being processed by an older frame, wait for it!
+        if (images_in_flight[img_idx] != VK_NULL_HANDLE) {
+            pfnWait(g_wsi.device, 1, &images_in_flight[img_idx], VK_TRUE, UINT64_MAX);
+        }
+        // Map this image to the current frame's fence
+        images_in_flight[img_idx] = g_wsi.in_flight[current_frame];
+
         pfnReset(g_wsi.device, 1, &g_wsi.in_flight[current_frame]);
 
-        // 4. Dynamic Swapchain Injection & Command Record
         p->swapchain_image = g_wsi.swapchain_images[img_idx];
-        p->swapchain_view  = g_wsi.swapchain_views[img_idx];
+        p->swapchain_view = g_wsi.swapchain_views[img_idx];
 
         vkResetCommandBuffer(cmd, 0);
         vibe_record_commands(cmd, p, p->draw_queue, p->draw_count, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
 
-        // 5. Submit
         VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo submitInfo = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -675,30 +685,29 @@ THREAD_FUNC render_thread_loop(void* arg) {
             .commandBufferCount = 1,
             .pCommandBuffers = &cmd,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &g_wsi.render_finished[current_frame] // Bound strictly to CPU timeline
+            .pSignalSemaphores = &g_wsi.render_finished[img_idx] // Restored to physical image index!
         };
         pfnSubmit(g_wsi.queue, 1, &submitInfo, g_wsi.in_flight[current_frame]);
 
-        // 6. Present
         VkPresentInfoKHR presentInfo = {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &g_wsi.render_finished[current_frame],  // Bound strictly to CPU timeline
+            .pWaitSemaphores = &g_wsi.render_finished[img_idx], // Restored to physical image index!
             .swapchainCount = 1,
             .pSwapchains = &g_wsi.swapchain,
-            .pImageIndices = &img_idx // Only the physical image index cares about img_idx
+            .pImageIndices = &img_idx
         };
         pfnPresent(g_wsi.queue, &presentInfo);
 
         current_frame = (current_frame + 1) % 3;
     }
+
     vkDeviceWaitIdle(g_wsi.device);
     vkFreeCommandBuffers(g_wsi.device, cmd_pool, 3, cmd_buffers);
     vkDestroyCommandPool(g_wsi.device, cmd_pool, NULL);
     printf("[C-CORE] Async Render Thread gracefully terminated and pool destroyed.\n");
     return NULL;
 }
-
 EXPORT void vibe_start_render_thread() {
     atomic_store_explicit(&g_render_thread_active, 1, memory_order_release);
     g_render_thread = vmath_thread_start(render_thread_loop, NULL);
