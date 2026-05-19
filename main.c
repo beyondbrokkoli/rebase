@@ -508,7 +508,7 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     PFN_vkCmdSetDepthTestEnable pfnDepthTest  = (PFN_vkCmdSetDepthTestEnable)g_wsi.pfnSetDepthTestEnable;
     PFN_vkCmdSetDepthWriteEnable pfnDepthWrite = (PFN_vkCmdSetDepthWriteEnable)g_wsi.pfnSetDepthWriteEnable;
     PFN_vkCmdSetDepthCompareOp  pfnDepthComp  = (PFN_vkCmdSetDepthCompareOp)g_wsi.pfnSetDepthCompareOp;
-    PFN_vkCmdSetPrimitiveTopology pfnTopo     = (PFN_vkCmdSetPrimitiveTopology)g_wsi.pfnSetPrimit
+    PFN_vkCmdSetPrimitiveTopology pfnTopo     = (PFN_vkCmdSetPrimitiveTopology)g_wsi.pfnSetPrimitiveTopology;
 
     // === SHADOW STATE INITIALIZATION ===
     // Initialized to invalid values to force an update on the first command.
@@ -520,7 +520,8 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     uint8_t  current_dtest = 0xFF;
     uint8_t  current_dwrite = 0xFF;
     uint8_t  current_dcomp = 0xFF;
-    uint8_t current_front = 0xFF; // Add this tracker
+    uint8_t current_front = 0xFF;
+    uint8_t current_topo = 0xFF;
 
     for (uint32_t i = 0; i < count; i++) {
         DrawCommand* draw = &queue[i];
