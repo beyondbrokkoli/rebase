@@ -148,16 +148,16 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     colorBlending.attachmentCount = 1
     colorBlending.pAttachments = colorBlendAttachment
 
-    -- 6. THE EXHAUSTIVE DYNAMIC STATE REGISTRY (Exactly 8 elements)
+    -- 6. THE EXHAUSTIVE DYNAMIC STATE REGISTRY (The REAL Integers)
     local dynamicStates = ffi.new("int32_t[8]", {
         0,          -- VK_DYNAMIC_STATE_VIEWPORT
         1,          -- VK_DYNAMIC_STATE_SCISSOR
-        1000267001, -- VK_DYNAMIC_STATE_CULL_MODE_EXT
-        1000267002, -- VK_DYNAMIC_STATE_FRONT_FACE_EXT
-        1000267003, -- VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT
-        1000267007, -- VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT
-        1000267008, -- VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT
-        1000267009  -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
+        1000267000, -- VK_DYNAMIC_STATE_CULL_MODE_EXT           (Was 001)
+        1000267001, -- VK_DYNAMIC_STATE_FRONT_FACE_EXT          (Was 002)
+        1000267002, -- VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT  (Was 003)
+        1000267006, -- VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT   (Was 007)
+        1000267007, -- VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT  (Was 008)
+        1000267008  -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT    (Was 009)
     })
 
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo")
