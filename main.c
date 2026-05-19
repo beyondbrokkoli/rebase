@@ -422,7 +422,7 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (VkPipeline)p->comp_pipeline);
         VkDescriptorSet dset = (VkDescriptorSet)p->comp_desc_set;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (VkPipelineLayout)p->comp_layout, 0, 1, &dset, 0, NULL);
-        vkCmdPushConstants(cmd, (VkPipelineLayout)p->comp_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 128, p->comp_pc_payload);
+        vkCmdPushConstants(cmd, (VkPipelineLayout)p->comp_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, p->comp_pc_payload);
 
         uint32_t group_count = (local_pc->particle_count + 255) / 256;
         vkCmdDispatch(cmd, group_count, 1, 1);
@@ -510,7 +510,7 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             current_descriptor = draw->descriptor_set;
         }
 
-        vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
+        vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
         vkCmdDraw(cmd, draw->vertex_count, draw->instance_count, draw->first_vertex, draw->first_instance);
     }
 

@@ -49,7 +49,7 @@ ffi.cdef[[
     int vibe_get_is_running();
     void vibe_trigger_shutdown();
     void vibe_mark_lua_finished();
-    
+
     // GLFW Bridge
     const char** vibe_get_glfw_extensions(uint32_t* count);
     void vibe_publish_vk_instance(void* instance);
@@ -297,7 +297,7 @@ local function main()
     local sensitivity = 0.002
     local move_speed = 320000.0
     local is_resizing = false
-    
+
     local last_time = get_time_hires()
     local last_resize_time = last_time
     local RESIZE_COOLDOWN = 0.25
@@ -307,7 +307,7 @@ local function main()
     local space_was_pressed = false
 
     print("[LUA CO] Entering Flattened Render Loop...")
-    
+
     -- FLATTENED RENDER LOOP (No Yielding)
     while ffi.C.vibe_get_is_running() == 1 do
         if ffi.C.vibe_get_resize_flag() == 1 then
@@ -474,6 +474,8 @@ local function main()
             packet.gfx_layout = ffi.cast("uint64_t", gfx_state.pipelineLayout)
             packet.vertex_buffer = ffi.cast("uint64_t", master_gpu_block)
             packet.index_buffer = ffi.cast("uint64_t", master_index_block)
+            packet.depth_image = ffi.cast("uint64_t", gfx_state.depthImage)
+            packet.depth_view = ffi.cast("uint64_t", gfx_state.depthImageView)
             packet.width = sc_state.extent.width
             packet.height = sc_state.extent.height
             ffi.copy(packet.comp_pc_payload, pc, 128)
