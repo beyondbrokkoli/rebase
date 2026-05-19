@@ -11,6 +11,39 @@ local graphics = require("graphics_pipeline")
 local renderer = require("renderer")
 local os = require("os")
 
+-- ==========================================
+-- HIGH-RESOLUTION KERNEL TIMER
+-- ==========================================
+local get_time_hires
+
+if jit.os == "Windows" then
+    ffi.cdef[[
+        int QueryPerformanceCounter(int64_t *lpPerformanceCount);
+        int QueryPerformanceFrequency(int64_t *lpFrequency);
+    ]]
+    local kernel32 = ffi.load("kernel32")
+    local freq = ffi.new("int64_t[1]")
+    kernel32.QueryPerformanceFrequency(freq)
+    local inv_freq = 1.0 / tonumber(freq[0])
+
+    get_time_hires = function()
+        local count = ffi.new("int64_t[1]")
+        kernel32.QueryPerformanceCounter(count)
+        return tonumber(count[0]) * inv_freq
+    end
+else
+    ffi.cdef[[
+        typedef struct { long tv_sec; long tv_nsec; } timespec;
+        int clock_gettime(int clk_id, timespec *tp);
+    ]]
+    local CLOCK_MONOTONIC = 1
+    get_time_hires = function()
+        local ts = ffi.new("timespec")
+        ffi.C.clock_gettime(CLOCK_MONOTONIC, ts)
+        return tonumber(ts.tv_sec) + (tonumber(ts.tv_nsec) * 1e-9)
+    end
+end
+
 ffi.cdef[[
     int vibe_get_is_running();
     void vibe_trigger_shutdown();
@@ -67,26 +100,47 @@ ffi.cdef[[
     void vmath_init_workers(int num_threads);
     void vmath_destroy_workers();
 
-    typedef struct __attribute__((packed, aligned(64))) {
-        uint64_t comp_pipeline;
-        uint64_t comp_layout;
-        uint64_t gfx_pipeline;
-        uint64_t gfx_layout;
-        uint64_t desc_set;
-        uint64_t vertex_buffer;
-        uint64_t index_buffer;
-        uint64_t swapchain_image;
-        uint64_t swapchain_view;
-        uint64_t depth_image;
-        uint64_t depth_view;
-        uint32_t width;
-        uint32_t height;
-        uint8_t pc_payload[128];
+    typedef struct {
+        uint64_t pipeline_id;
+        uint64_t descriptor_set;
+        uint32_t vertex_count;
+        uint32_t instance_count;
+        uint32_t first_vertex;
+        uint32_t first_instance;
+        uint8_t  push_constants[128];
         uint8_t _padding[32];
+    } DrawCommand;
+
+    typedef struct __attribute__((packed, aligned(64))) {
+        uint64_t comp_pipeline;     // 8 bytes
+        uint64_t comp_layout;       // 8 bytes
+        uint64_t comp_desc_set;     // 8 bytes
+        uint64_t gfx_layout;        // 8 bytes
+        uint64_t vertex_buffer;     // 8 bytes
+        uint64_t index_buffer;      // 8 bytes
+        uint64_t swapchain_image;   // 8 bytes
+        uint64_t swapchain_view;    // 8 bytes
+        uint64_t depth_image;       // 8 bytes
+        uint64_t depth_view;        // 8 bytes
+                                    // --- Subtotal: 80 bytes
+
+        uint32_t width;             // 4 bytes
+        uint32_t height;            // 4 bytes
+        uint32_t draw_count;        // 4 bytes
+        uint32_t _pad_ptr;          // 4 bytes (CRITICAL: Aligns the pointer to 96!)
+                                    // --- Subtotal: 96 bytes
+
+        DrawCommand* draw_queue;    // 8 bytes (Properly aligned to an 8-byte boundary)
+                                    // --- Subtotal: 104 bytes
+
+        uint8_t comp_pc_payload[128]; // 128 bytes
+                                      // --- Subtotal: 232 bytes
+
+        uint8_t _padding[24];       // 24 bytes (Perfectly rounds out the cache line)
+                                    // --- TOTAL: 256 bytes (Exactly 4x 64-byte lines)
     } RenderPacket;
 
     void vibe_stream_positions(int count, float* c_px, float* c_py, float* c_pz, float* g_px, float* g_py, float* g_pz);
-    void vibe_record_commands(RenderPacket* p, void* pfnBegin, void* pfnEnd);
     int vibe_ring_get_write_idx();
     RenderPacket* vibe_ring_get_packet(int idx);
     void vibe_ring_submit(int idx);
@@ -118,6 +172,7 @@ ffi.cdef[[
     void Sleep(uint32_t dwMilliseconds); // Windows
     int usleep(uint32_t usec);           // Linux
 ]]
+
 local function sys_sleep(ms)
     if jit.os == "Windows" then
         ffi.C.Sleep(ms)
@@ -125,6 +180,7 @@ local function sys_sleep(ms)
         ffi.C.usleep(ms * 1000)
     end
 end
+
 local vmath_lib = ffi.load(jit.os == "Windows" and "vibemath.dll" or "./libvibemath.so")
 
 local function main()
@@ -229,6 +285,10 @@ local function main()
     local c_vx, c_vy, c_vz = cpu_soa.vx, cpu_soa.vy, cpu_soa.vz
     local c_seed = cpu_soa.seed
 
+    -- Global Queue Allocation (Triple Buffered)
+    local MAX_DRAW_COMMANDS = 1024
+    local render_queues = ffi.new("DrawCommand[?]", MAX_DRAW_COMMANDS * 3)
+
     local frame_count = 0
     local pc = ffi.new("PushConstants")
     pc.pos_x_idx = 0
@@ -248,24 +308,26 @@ local function main()
     local sensitivity = 0.002
     local move_speed = 320000.0
     local is_resizing = false
-    local last_resize_time = 0.0
+    
+    local last_time = get_time_hires()
+    local last_resize_time = last_time
     local RESIZE_COOLDOWN = 0.25
-    local last_time = os.clock()
     local current_swarm_state = 1
     local MAX_SWARM_STATES = 7
     local swarm_cmd = ffi.new("SwarmCommand")
     local space_was_pressed = false
 
     print("[LUA CO] Entering Flattened Render Loop...")
+    
     -- FLATTENED RENDER LOOP (No Yielding)
     while ffi.C.vibe_get_is_running() == 1 do
         if ffi.C.vibe_get_resize_flag() == 1 then
             is_resizing = true
-            last_resize_time = os.clock()
+            last_resize_time = get_time_hires()
         end
 
         if is_resizing then
-            if (os.clock() - last_resize_time) > RESIZE_COOLDOWN then
+            if (get_time_hires() - last_resize_time) > RESIZE_COOLDOWN then
                 print("[LUA CO] Window Stable. Initiating Vulkan Rebuild...")
                 ffi.C.vibe_kill_render_thread()
                 vk.vkDeviceWaitIdle(device)
@@ -279,7 +341,6 @@ local function main()
                     swapchain_core.Destroy(vk, vk_state, sc_state)
                     renderer.Destroy(vk, device, sync_state, 3)
 
-                    -- JIT SAFE: Replaced pairs() with direct table reassignment
                     sc_state = swapchain_core.Init(vk, vk_state, new_w[0], new_h[0])
                     gfx_state = graphics.Init(vk, vk_state, new_w[0], new_h[0], desc_state.pipelineLayout, sc_state.format)
 
@@ -325,10 +386,10 @@ local function main()
                 end
                 print("[LUA CO] Rebuild Complete.")
                 is_resizing = false
-                last_time = os.clock()
+                last_time = get_time_hires()
             end
         else
-            local current_time = os.clock()
+            local current_time = get_time_hires()
             local dt = math.max(0.001, math.min(current_time - last_time, 0.033))
             last_time = current_time
 
@@ -380,7 +441,6 @@ local function main()
             swarm_cmd.mouse_x = 0.0
             swarm_cmd.mouse_y = 5000.0
 
-            -- JIT SAFE: Utilizing direct locals instead of cpu_soa table hash lookups
             vmath_lib.vmath_dispatch_swarm(
                 pc.particle_count,
                 c_px, c_py, c_pz,
@@ -398,40 +458,53 @@ local function main()
             local gpu_py = master_ptr + (frame_offset + padded_capacity)
             local gpu_pz = master_ptr + (frame_offset + (padded_capacity * 2))
 
-            -- JIT SAFE: Localized SOA pointers streamed out
             vmath_lib.vibe_stream_positions(
                 padded_capacity,
                 c_px, c_py, c_pz,
                 gpu_px, gpu_py, gpu_pz
             )
 
-            -- 3. Tell the shaders where the positions live
             pc.pos_x_idx = frame_offset
             pc.pos_y_idx = frame_offset + padded_capacity
             pc.pos_z_idx = frame_offset + (padded_capacity * 2)
 
-            -- 2. Ensure the velocity pointers are bound so the GPU knows where to read/write the foam
             pc.vel_x_idx = frame_offset + (padded_capacity * 3)
             pc.vel_y_idx = frame_offset + (padded_capacity * 4)
             pc.vel_z_idx = frame_offset + (padded_capacity * 5)
 
-            -- JIT SAFE: Cached Vulkan buffers passed in cleanly
-            local success = renderer.ExecuteFrame(
-                sc_state,
-                master_gpu_block,
-                master_index_block,
-                comp_state,
-                gfx_state,
-                pc,
-                desc_state,
-                write_idx
-            )
+            -- ==========================================
+            -- DATA-ORIENTED QUEUE POPULATION
+            -- ==========================================
+            local packet = ffi.C.vibe_ring_get_packet(write_idx)
+            local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
 
-            if not success then
-                print("[RENDERER] VK_ERROR_OUT_OF_DATE_KHR Triggered! Forcing Rebuild Protocol.")
-                is_resizing = true
-                last_resize_time = os.clock()
-            end
+            -- Populate Compute & Global Context
+            packet.comp_pipeline = ffi.cast("uint64_t", comp_state.pipeline)
+            packet.comp_layout = ffi.cast("uint64_t", comp_state.pipelineLayout)
+            packet.comp_desc_set = ffi.cast("uint64_t", desc_state.set0)
+            packet.gfx_layout = ffi.cast("uint64_t", gfx_state.pipelineLayout)
+            packet.vertex_buffer = ffi.cast("uint64_t", master_gpu_block)
+            packet.index_buffer = ffi.cast("uint64_t", master_index_block)
+            packet.width = sc_state.extent.width
+            packet.height = sc_state.extent.height
+            ffi.copy(packet.comp_pc_payload, pc, 128)
+
+            -- Populate Draw Queue Data (Index 0: Ice Shards)
+            local draw_cmd = current_queue_ptr[0]
+            draw_cmd.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            draw_cmd.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+            draw_cmd.vertex_count = 24
+            draw_cmd.instance_count = pc.particle_count
+            draw_cmd.first_vertex = 0
+            draw_cmd.first_instance = 0
+            ffi.copy(draw_cmd.push_constants, pc, 128)
+
+            -- Bind the queue to the Ring Buffer packet
+            packet.draw_queue = current_queue_ptr
+            packet.draw_count = 1
+
+            -- Cross the boundary ONCE
+            ffi.C.vibe_ring_submit(write_idx)
 
             frame_count = frame_count + 1
         end
@@ -461,6 +534,5 @@ local function main()
     vulkan_core.Destroy(vk_state)
 end
 
--- Fire it up procedurally
 main()
 ffi.C.vibe_mark_lua_finished()

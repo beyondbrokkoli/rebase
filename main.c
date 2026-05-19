@@ -315,23 +315,44 @@ typedef struct {
     void* pfnBegin;
     void* pfnEnd;
 } RenderThreadInit;
+typedef struct {
+    uint64_t pipeline_id;
+    uint64_t descriptor_set;
+    uint32_t vertex_count;
+    uint32_t instance_count;
+    uint32_t first_vertex;
+    uint32_t first_instance;
+    uint8_t  push_constants[128];
+    uint8_t _padding[32];
+} DrawCommand;
 
 typedef struct __attribute__((packed, aligned(64))) {
-    uint64_t comp_pipeline;
-    uint64_t comp_layout;
-    uint64_t gfx_pipeline;
-    uint64_t gfx_layout;
-    uint64_t desc_set;
-    uint64_t vertex_buffer;
-    uint64_t index_buffer;     // Added
-    uint64_t swapchain_image;
-    uint64_t swapchain_view;
-    uint64_t depth_image;
-    uint64_t depth_view;
-    uint32_t width;
-    uint32_t height;
-    uint8_t pc_payload[128];
-    uint8_t _padding[32];      // Adjusted to maintain 256-byte alignment
+    uint64_t comp_pipeline;     // 8 bytes
+    uint64_t comp_layout;       // 8 bytes
+    uint64_t comp_desc_set;     // 8 bytes
+    uint64_t gfx_layout;        // 8 bytes
+    uint64_t vertex_buffer;     // 8 bytes
+    uint64_t index_buffer;      // 8 bytes
+    uint64_t swapchain_image;   // 8 bytes
+    uint64_t swapchain_view;    // 8 bytes
+    uint64_t depth_image;       // 8 bytes
+    uint64_t depth_view;        // 8 bytes
+                                // --- Subtotal: 80 bytes
+
+    uint32_t width;             // 4 bytes
+    uint32_t height;            // 4 bytes
+    uint32_t draw_count;        // 4 bytes
+    uint32_t _pad_ptr;          // 4 bytes (CRITICAL: Aligns the pointer to 96!)
+                                // --- Subtotal: 96 bytes
+
+    DrawCommand* draw_queue;    // 8 bytes (Properly aligned to an 8-byte boundary)
+                                // --- Subtotal: 104 bytes
+
+    uint8_t comp_pc_payload[128]; // 128 bytes
+                                // --- Subtotal: 232 bytes
+
+    uint8_t _padding[24];       // 24 bytes (Perfectly rounds out the cache line)
+                                // --- TOTAL: 256 bytes (Exactly 4x 64-byte lines)
 } RenderPacket;
 
 // The Triad Topology
@@ -375,53 +396,43 @@ EXPORT void vibe_ring_submit(int idx) {
     atomic_store_explicit(&g_ring.ready_idx, idx, memory_order_release);
 }
 
-EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
+EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    PushConstants* local_pc = (PushConstants*)p->pc_payload;
-
-    // 1. COMPUTE PASS & SYNCHRONIZATION
+    // 1. Compute Dispatch (Preserved)
     if (p->comp_pipeline != 0) {
+        PushConstants* local_pc = (PushConstants*)p->comp_pc_payload;
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (VkPipeline)p->comp_pipeline);
-        VkDescriptorSet dset = (VkDescriptorSet)p->desc_set;
+        VkDescriptorSet dset = (VkDescriptorSet)p->comp_desc_set;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (VkPipelineLayout)p->comp_layout, 0, 1, &dset, 0, NULL);
+        vkCmdPushConstants(cmd, (VkPipelineLayout)p->comp_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 128, p->comp_pc_payload);
 
-        // Push constants for compute
-        vkCmdPushConstants(cmd, (VkPipelineLayout)p->comp_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, p->pc_payload);
-
-        // Calculate dispatch size (assuming local_size_x = 256 in swarm_comp.spv)
         uint32_t group_count = (local_pc->particle_count + 255) / 256;
         vkCmdDispatch(cmd, group_count, 1, 1);
 
-        // COMPUTE -> GRAPHICS MEMORY BARRIER
-        // Guarantees compute shader SSBO writes are fully visible before Vertex Input reads them.
         VkMemoryBarrier compBarrier = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
             .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT
         };
-
-        vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-            0, 1, &compBarrier, 0, NULL, 0, NULL);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &compBarrier, 0, NULL, 0, NULL);
     }
 
-    // 2. WSI BARRIERS & RENDERING
+    // 2. Setup Render Pass Barriers (Preserved)
     VkImageMemoryBarrier preBarriers[2] = {0};
     preBarriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     preBarriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     preBarriers[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     preBarriers[0].image = (VkImage)p->swapchain_image;
-    preBarriers[0].subresourceRange = (VkImageSubresourceRange){ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    preBarriers[0].subresourceRange = (VkImageSubresourceRange){VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     preBarriers[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
     preBarriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     preBarriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     preBarriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     preBarriers[1].image = (VkImage)p->depth_image;
-    preBarriers[1].subresourceRange = (VkImageSubresourceRange){ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+    preBarriers[1].subresourceRange = (VkImageSubresourceRange){VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
     preBarriers[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0, NULL, 0, NULL, 2, preBarriers);
@@ -455,11 +466,7 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, PFN_vkCmd
 
     pfnBegin(cmd, &renderInfo);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)p->gfx_pipeline);
-
-    VkDescriptorSet dset = (VkDescriptorSet)p->desc_set;
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipelineLayout)p->gfx_layout, 0, 1, &dset, 0, NULL);
-
+    // 3. Global Graphics State Setup
     VkViewport viewport = {0.0f, 0.0f, (float)p->width, (float)p->height, 0.0f, 1.0f};
     VkRect2D scissor = {{0, 0}, {p->width, p->height}};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
@@ -469,29 +476,43 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, PFN_vkCmd
     VkBuffer vbo = (VkBuffer)p->vertex_buffer;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
 
-    // Push constants for graphics
-    vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, p->pc_payload);
+    // 4. Data-Oriented Queue Execution
+    uint64_t current_pipeline = 0;
+    uint64_t current_descriptor = 0;
 
-    // vkCmdDraw(cmd, local_pc->particle_count, 1, 0, 0);
-    // Draw 24 vertices (8 faces) for every instance
-    vkCmdDraw(cmd, 24, local_pc->particle_count, 0, 0);
+    for (uint32_t i = 0; i < count; i++) {
+        DrawCommand* draw = &queue[i];
+
+        if (draw->pipeline_id != current_pipeline) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)draw->pipeline_id);
+            current_pipeline = draw->pipeline_id;
+        }
+
+        if (draw->descriptor_set != current_descriptor) {
+            VkDescriptorSet dset = (VkDescriptorSet)draw->descriptor_set;
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipelineLayout)p->gfx_layout, 0, 1, &dset, 0, NULL);
+            current_descriptor = draw->descriptor_set;
+        }
+
+        vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
+        vkCmdDraw(cmd, draw->vertex_count, draw->instance_count, draw->first_vertex, draw->first_instance);
+    }
 
     pfnEnd(cmd);
 
+    // 5. Present Barrier (Preserved)
     VkImageMemoryBarrier presentBarrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         .image = (VkImage)p->swapchain_image,
-        .subresourceRange = (VkImageSubresourceRange){ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+        .subresourceRange = (VkImageSubresourceRange){VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
         .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
         .dstAccessMask = 0
     };
-
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &presentBarrier);
     vkEndCommandBuffer(cmd);
 }
-
 THREAD_FUNC render_thread_loop(void* arg) {
     printf("[C-CORE] Async Render Thread Online.\n");
 
@@ -556,7 +577,7 @@ THREAD_FUNC render_thread_loop(void* arg) {
         p->swapchain_view  = g_wsi.swapchain_views[img_idx];
 
         vkResetCommandBuffer(cmd, 0);
-        vibe_record_commands(cmd, p, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
+        vibe_record_commands(cmd, p, p->draw_queue, p->draw_count, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
 
         // 5. Submit
         VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
