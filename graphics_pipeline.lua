@@ -121,11 +121,9 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     ffi.fill(depthStencil, ffi.sizeof(depthStencil))
     depthStencil.sType = 25
 
-    -- IMPORTANT: Set these to TRUE to "keep the door open"
-    -- for the dynamic states to control them later.
-    depthStencil.depthTestEnable = 1
-    depthStencil.depthWriteEnable = 1
-    depthStencil.depthCompareOp = 4 -- VK_COMPARE_OP_GREATER
+    depthStencil.depthTestEnable = 0
+    depthStencil.depthWriteEnable = 0
+    depthStencil.depthCompareOp = 0
 
     local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo")
     ffi.fill(multisampling, ffi.sizeof(multisampling)); multisampling.sType = 24; multisampling.rasterizationSamples = 1
