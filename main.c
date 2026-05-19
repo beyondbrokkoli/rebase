@@ -676,7 +676,7 @@ THREAD_FUNC render_thread_loop(void* arg) {
             .pCommandBuffers = &cmd,
             .signalSemaphoreCount = 1,
             // CHANGE 1: Use img_idx to guarantee 1:1 mapping with the acquired image
-            .pSignalSemaphores = &g_wsi.render_finished[img_idx]
+            .pSignalSemaphores = &g_wsi.render_finished[current_frame]
         };
         pfnSubmit(g_wsi.queue, 1, &submitInfo, g_wsi.in_flight[current_frame]);
 
@@ -685,7 +685,7 @@ THREAD_FUNC render_thread_loop(void* arg) {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
             // CHANGE 2: Wait on the semaphore tied to this specific image
-            .pWaitSemaphores = &g_wsi.render_finished[img_idx],
+            .pWaitSemaphores = &g_wsi.render_finished[current_frame],
             .swapchainCount = 1,
             .pSwapchains = &g_wsi.swapchain,
             .pImageIndices = &img_idx
