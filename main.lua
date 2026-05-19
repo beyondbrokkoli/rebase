@@ -111,9 +111,10 @@ ffi.cdef[[
         uint8_t  depth_test;
         uint8_t  depth_write;
         uint8_t  depth_compare;
-        uint8_t  _pad0[3];          // Explicitly align to 4-byte boundary
+        uint8_t  topology;
+        uint8_t  _pad0[2];
         uint32_t viewport_scale_id;
-        uint8_t  _padding[4];       // Adjusting to reach 192
+        uint8_t  _padding[4];
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
@@ -158,6 +159,7 @@ ffi.cdef[[
         void* pfnSetDepthTestEnable;
         void* pfnSetDepthWriteEnable;
         void* pfnSetDepthCompareOp;
+        void* pfnSetPrimitiveTopology;
     } RenderThreadInit;
 
 
@@ -280,9 +282,12 @@ local function main()
     wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
 
     wsi.pfnSetCullMode = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT"))
+    wsi.pfnSetFrontFace = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetFrontFaceEXT"))
     wsi.pfnSetDepthTestEnable = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT"))
     wsi.pfnSetDepthWriteEnable = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT"))
     wsi.pfnSetDepthCompareOp = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT"))
+    wsi.pfnSetPrimitiveTopology = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetPrimitiveTopologyEXT"))
+
 
     ffi.C.vibe_ring_init_wsi(wsi)
     ffi.C.vibe_start_render_thread()
@@ -540,6 +545,8 @@ local function main()
             cmd0.scissor_x = 0; cmd0.scissor_y = 0
             cmd0.scissor_w = sc_state.extent.width; cmd0.scissor_h = sc_state.extent.height
             cmd0.cull_mode = 2     -- VK_CULL_MODE_BACK_BIT
+            cmd0.front_face = 1    -- VK_FRONT_FACE_COUNTER_CLOCKWISE <-- ADD
+            cmd0.topology = 3      -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST <-- ADD
             cmd0.depth_test = 1    -- VK_TRUE
             cmd0.depth_write = 1   -- VK_TRUE
             cmd0.depth_compare = 4 -- VK_COMPARE_OP_GREATER
@@ -560,10 +567,12 @@ local function main()
             pc_cube.target_state = 99 -- Hacky color flag for the shader
             ffi.copy(cmd1.push_constants, pc_cube, 128)
 
-            -- COMMAND 1: CUBES (Currently set as a UI/Overlay test: No Culling, No Depth Test)
+            -- COMMAND 1: CUBES (UI/Overlay test)
             cmd1.scissor_x = 0; cmd1.scissor_y = 0
             cmd1.scissor_w = sc_state.extent.width; cmd1.scissor_h = sc_state.extent.height
             cmd1.cull_mode = 0     -- VK_CULL_MODE_NONE
+            cmd1.front_face = 1    -- VK_FRONT_FACE_COUNTER_CLOCKWISE <-- ADD
+            cmd1.topology = 3      -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST <-- ADD
             cmd1.depth_test = 0    -- VK_FALSE
             cmd1.depth_write = 0   -- VK_FALSE
             cmd1.depth_compare = 7 -- VK_COMPARE_OP_ALWAYS

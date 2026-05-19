@@ -316,9 +316,10 @@ typedef struct {
     uint8_t  depth_test;
     uint8_t  depth_write;
     uint8_t  depth_compare;
-    uint8_t  _pad0[3];          // Explicitly align to 4-byte boundary
+    uint8_t  topology;        // <-- ADD THIS
+    uint8_t  _pad0[2];        // <-- CHANGED to 2 to align to 4 bytes
     uint32_t viewport_scale_id;
-    uint8_t  _padding[4];       // Adjusting to reach 192
+    uint8_t  _padding[4];
 } DrawCommand;
 _Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
 
@@ -375,6 +376,7 @@ typedef struct {
     void* pfnSetDepthTestEnable;
     void* pfnSetDepthWriteEnable;
     void* pfnSetDepthCompareOp;
+    void* pfnSetPrimitiveTopology;
 } RenderThreadInit;
 
 // Vulkan Extended Dynamic State PFNs
@@ -383,6 +385,7 @@ typedef void (VKAPI_PTR *PFN_vkCmdSetFrontFace)(VkCommandBuffer, VkFrontFace);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthTestEnable)(VkCommandBuffer, VkBool32);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthWriteEnable)(VkCommandBuffer, VkBool32);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOp)(VkCommandBuffer, VkCompareOp);
+typedef void (VKAPI_PTR *PFN_vkCmdSetPrimitiveTopology)(VkCommandBuffer, VkPrimitiveTopology);
 
 typedef struct {
     alignas(64) RenderPacket packets[3];
@@ -499,12 +502,13 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     VkBuffer ibo = (VkBuffer)p->index_buffer;
     vkCmdBindIndexBuffer(cmd, ibo, 0, VK_INDEX_TYPE_UINT32);
 
-    // Fetch dynamic PFNs from global WSI struct
+    // Fetch dynamic PFNs
     PFN_vkCmdSetCullMode        pfnCull       = (PFN_vkCmdSetCullMode)g_wsi.pfnSetCullMode;
+    PFN_vkCmdSetFrontFace       pfnFront      = (PFN_vkCmdSetFrontFace)g_wsi.pfnSetFrontFace;
     PFN_vkCmdSetDepthTestEnable pfnDepthTest  = (PFN_vkCmdSetDepthTestEnable)g_wsi.pfnSetDepthTestEnable;
     PFN_vkCmdSetDepthWriteEnable pfnDepthWrite = (PFN_vkCmdSetDepthWriteEnable)g_wsi.pfnSetDepthWriteEnable;
     PFN_vkCmdSetDepthCompareOp  pfnDepthComp  = (PFN_vkCmdSetDepthCompareOp)g_wsi.pfnSetDepthCompareOp;
-    PFN_vkCmdSetFrontFace pfnFront = (PFN_vkCmdSetFrontFace)g_wsi.pfnSetFrontFace;
+    PFN_vkCmdSetPrimitiveTopology pfnTopo     = (PFN_vkCmdSetPrimitiveTopology)g_wsi.pfnSetPrimit
 
     // === SHADOW STATE INITIALIZATION ===
     // Initialized to invalid values to force an update on the first command.
@@ -524,6 +528,14 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         if (draw->pipeline_id != current_pipeline) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)draw->pipeline_id);
             current_pipeline = draw->pipeline_id;
+
+            // RESET TRACKERS ON PIPELINE CHANGE
+            current_cull = 0xFF;
+            current_front = 0xFF;
+            current_dtest = 0xFF;
+            current_dwrite = 0xFF;
+            current_dcomp = 0xFF;
+            current_topo = 0xFF;
         }
 
         if (draw->descriptor_set != current_descriptor) {
@@ -553,7 +565,10 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             pfnCull(cmd, (VkCullModeFlags)draw->cull_mode);
             current_cull = draw->cull_mode;
         }
-
+        if (pfnFront && draw->front_face != current_front) {
+            pfnFront(cmd, (VkFrontFace)draw->front_face);
+            current_front = draw->front_face;
+        }
         if (pfnDepthTest && draw->depth_test != current_dtest) {
             pfnDepthTest(cmd, (VkBool32)draw->depth_test);
             current_dtest = draw->depth_test;
@@ -568,9 +583,9 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             pfnDepthComp(cmd, (VkCompareOp)draw->depth_compare);
             current_dcomp = draw->depth_compare;
         }
-        if (pfnFront && draw->front_face != current_front) {
-            pfnFront(cmd, (VkFrontFace)draw->front_face);
-            current_front = draw->front_face;
+        if (pfnTopo && draw->topology != current_topo) {
+            pfnTopo(cmd, (VkPrimitiveTopology)draw->topology);
+            current_topo = draw->topology;
         }
         // Execute Draw
         vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
