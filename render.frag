@@ -29,7 +29,8 @@ void main() {
         // Obsidian Cubes: Dull, broad specular highlights
         specPower = 16.0;
         specIntensity = 0.3;
-        specTint = vec3(0.8, 0.7, 1.0); // Slight purple metallic sheen
+        // Replaced the lilac sheen with an icy, deep-sea cyan reflection
+        specTint = vec3(0.4, 0.8, 1.0); 
     }
 
     float specular = pow(max(dot(normal, halfDir), 0.0), specPower) * specIntensity;

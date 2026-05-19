@@ -102,30 +102,34 @@ void main() {
     v_worldPos = final_world_pos;
     v_shapeID = pc.target_state;
 
-    // ==========================================
-    // SPATIAL COLOR DISTRIBUTION
-    // ==========================================
+    // SPATIAL COLOR DISTRIBUTION (MERIDIAN DOMINANCE)
     // Generate a massive, sweeping 3D wave through the world coordinates
     float spatial_wave = sin(anchor.x * 0.00015) * cos(anchor.z * 0.00015) * sin(anchor.y * 0.0001);
     float norm_wave = spatial_wave * 0.5 + 0.5; // Scale to 0.0 -> 1.0
 
-    vec3 c_meridian = vec3(0.0, 0.25, 0.55); // Deep oceanic blue
-    vec3 c_cyan     = vec3(0.15, 0.65, 0.85); // Bright transition
-    vec3 c_ice      = vec3(0.95, 0.98, 1.00); // Blinding white
+    // Much richer, deeper Meridian Blue
+    vec3 c_meridian = vec3(0.0, 0.35, 0.75); 
+    vec3 c_cyan     = vec3(0.15, 0.75, 0.90); 
+    vec3 c_ice      = vec3(0.95, 0.98, 1.00); 
 
     vec3 swarm_color;
-    if (norm_wave < 0.5) {
-        swarm_color = mix(c_meridian, c_cyan, norm_wave * 2.0);
+    
+    // Shift the balance: Meridian Blue now claims 70% of the spatial wave
+    if (norm_wave < 0.7) {
+        // Smoothly mix from Meridian to Cyan over the 0.0 -> 0.7 range
+        swarm_color = mix(c_meridian, c_cyan, norm_wave * (1.0 / 0.7));
     } else {
-        swarm_color = mix(c_cyan, c_ice, (norm_wave - 0.5) * 2.0);
+        // Fast, sharp transition to Ice White for the peaks (0.7 -> 1.0)
+        swarm_color = mix(c_cyan, c_ice, (norm_wave - 0.7) * (1.0 / 0.3));
     }
 
-    // Inject per-particle noise so it looks natural, not like a perfect gradient
+    // Inject per-particle noise so it looks natural
     swarm_color = mix(swarm_color, vec3(h1, h2, h3), 0.15);
 
-    // Override color for the Asteroid Cubes
+    // Override color for the Asteroid Cubes (DEATH TO PURPLE)
     if (pc.target_state == 99) {
-        swarm_color = mix(vec3(0.08, 0.08, 0.1), vec3(0.25, 0.15, 0.3), h2);
+        // Now they are dark, abyssal slate/teal
+        swarm_color = mix(vec3(0.04, 0.06, 0.10), vec3(0.10, 0.25, 0.35), h2);
     }
 
     fragColor = swarm_color;
