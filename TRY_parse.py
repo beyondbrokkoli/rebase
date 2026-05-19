@@ -117,12 +117,13 @@ def generate_lua_ffi_cdef(xml_path):
             if name and value:
                 ffi_declarations.append(f"    {name} = {value},")
 
-    # 2. Grab Extension & Feature Enums (THE MAGIC NUMBER KILLER)
-    # Process <feature> tags first, then <extension> tags so aliases work!
-    for parent_node in root.findall('.//feature') + root.findall('.//extension'):
-        parent_extnumber = parent_node.get('number')
+    # 2. Grab Extension Enums (THE MAGIC NUMBER KILLER - FIXED FOR STANDARD ET)
+    # Loop through extensions first to capture their extnumber
+    for extension in root.findall('.//extension'):
+        parent_extnumber = extension.get('number')
 
-        for ext_node in parent_node.findall('.//require/enum[@extends]'):
+        # Now find the enums inside this specific extension
+        for ext_node in extension.findall('.//require/enum[@extends]'):
             name = ext_node.get('name')
             value = ext_node.get('value')
             alias = ext_node.get('alias')
@@ -130,15 +131,14 @@ def generate_lua_ffi_cdef(xml_path):
             dir = ext_node.get('dir')
 
             # An enum can override the parent's extnumber
-            actual_extnumber = ext_node.get('extnumber')
-            if not actual_extnumber and parent_node.tag == 'extension':
-                actual_extnumber = parent_extnumber
+            actual_extnumber = ext_node.get('extnumber') or parent_extnumber
 
             if value:
                 ffi_declarations.append(f"    {name} = {value},")
             elif alias:
                 ffi_declarations.append(f"    {name} = {alias},")
             elif offset and actual_extnumber:
+                # Vulkan's Native Extension Math
                 ext_base = 1000000000 + (int(actual_extnumber) - 1) * 1000
                 calc_val = ext_base + int(offset)
                 if dir == '-':

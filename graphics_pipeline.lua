@@ -122,15 +122,15 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local colorBlending = ffi.new("VkPipelineColorBlendStateCreateInfo")
     ffi.fill(colorBlending, ffi.sizeof(colorBlending)); colorBlending.sType = 26; colorBlending.attachmentCount = 1; colorBlending.pAttachments = colorBlendAttachment
 
-    -- === INJECT EXTENDED DYNAMIC STATES ===
+    -- === INJECT EXTENDED DYNAMIC STATES (BULLETPROOF) ===
     local dynamicStates = ffi.new("int32_t[6]", {
-        0,          -- VK_DYNAMIC_STATE_VIEWPORT
-        1,          -- VK_DYNAMIC_STATE_SCISSOR
-        1000267001, -- VK_DYNAMIC_STATE_CULL_MODE_EXT
-        1000267007, -- VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT
-        1000267008, -- VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT
-        1000267009  -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
-    })
+        ffi.C.VK_DYNAMIC_STATE_VIEWPORT,
+        ffi.C.VK_DYNAMIC_STATE_SCISSOR,
+        ffi.C.VK_DYNAMIC_STATE_CULL_MODE_EXT,
+        ffi.C.VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT,
+        ffi.C.VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT,
+        ffi.C.VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
+    });
 
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo", {
         sType = 27,
