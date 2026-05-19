@@ -96,12 +96,14 @@ ffi.cdef[[
     typedef struct {
         uint64_t pipeline_id;
         uint64_t descriptor_set;
-        uint32_t vertex_count;
+        uint32_t index_count;       // Swapped from vertex_count
         uint32_t instance_count;
-        uint32_t first_vertex;
+        uint32_t first_index;       // Swapped from first_vertex
+        int32_t  vertex_offset;     // NEW: Allows us to shift the starting vertex
         uint32_t first_instance;
+        uint32_t _pad_cmd;          // NEW: Keeps the 8-byte alignment perfect
         uint8_t  push_constants[128];
-        uint8_t  _padding[32];
+        uint8_t  _padding[24];      // Adjusted to keep exactly 192 bytes
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
@@ -264,9 +266,7 @@ local function main()
     ffi.C.vibe_ring_init_wsi(wsi)
     ffi.C.vibe_start_render_thread()
 
-    -- ==========================================
     -- HOT PATH OPTIMIZATIONS (Caching Locality)
-    -- ==========================================
     local master_gpu_block = memory.Buffers["MASTER_GPU_BLOCK"]
     local master_index_block = memory.Buffers["MASTER_INDEX_BLOCK"]
 
@@ -305,6 +305,28 @@ local function main()
     local MAX_SWARM_STATES = 7
     local swarm_cmd = ffi.new("SwarmCommand")
     local space_was_pressed = false
+
+    -- GEOMETRY COMPILATION
+    print("[LUA CO] Compiling Geometry...")
+    local idx_ptr = ffi.cast("uint32_t*", memory.Mapped["MASTER_INDEX_BLOCK"])
+
+    local indices = {
+        -- SHAPE 0: ICE SHARD (24 indices. Uses vertices 0-5)
+        0,2,3, 0,3,4, 0,4,5, 0,5,2, -- Top faces
+        1,3,2, 1,4,3, 1,5,4, 1,2,5, -- Bottom faces
+
+        -- SHAPE 1: CUBE (36 indices. Uses vertices 6-13)
+        6,7,8, 6,8,9,       -- Front
+        7,11,12, 7,12,8,    -- Right
+        11,10,13, 11,13,12, -- Back
+        10,6,9, 10,9,13,    -- Left
+        9,8,12, 9,12,13,    -- Top
+        10,11,7, 10,7,6     -- Bottom
+    }
+
+    for i, idx in ipairs(indices) do
+        idx_ptr[i - 1] = idx
+    end
 
     print("[LUA CO] Entering Flattened Render Loop...")
 
@@ -453,10 +475,10 @@ local function main()
                 gpu_px, gpu_py, gpu_pz
             )
 
+            -- 3. Tell the shaders where the positions live
             pc.pos_x_idx = frame_offset
             pc.pos_y_idx = frame_offset + padded_capacity
             pc.pos_z_idx = frame_offset + (padded_capacity * 2)
-
             pc.vel_x_idx = frame_offset + (padded_capacity * 3)
             pc.vel_y_idx = frame_offset + (padded_capacity * 4)
             pc.vel_z_idx = frame_offset + (padded_capacity * 5)
@@ -467,7 +489,8 @@ local function main()
             local packet = ffi.C.vibe_ring_get_packet(write_idx)
             local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
 
-            -- Populate Compute & Global Context
+            -- 1. Populate Compute & Global Context (KEEP THIS!)
+            -- C still needs to know the global state for the RenderPass
             packet.comp_pipeline = ffi.cast("uint64_t", comp_state.pipeline)
             packet.comp_layout = ffi.cast("uint64_t", comp_state.pipelineLayout)
             packet.comp_desc_set = ffi.cast("uint64_t", desc_state.set0)
@@ -480,21 +503,41 @@ local function main()
             packet.height = sc_state.extent.height
             ffi.copy(packet.comp_pc_payload, pc, 128)
 
-            -- Populate Draw Queue Data (Index 0: Ice Shards)
-            local draw_cmd = current_queue_ptr[0]
-            draw_cmd.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
-            draw_cmd.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-            draw_cmd.vertex_count = 24
-            draw_cmd.instance_count = pc.particle_count
-            draw_cmd.first_vertex = 0
-            draw_cmd.first_instance = 0
-            ffi.copy(draw_cmd.push_constants, pc, 128)
+            -- 2. Populate Draw Queue Data (DUAL DISPATCH)
+            local half_count = math.floor(pc.particle_count / 2)
 
-            -- Bind the queue to the Ring Buffer packet
+            -- COMMAND 0: The Ice Shard Swarm (First Half)
+            local cmd0 = current_queue_ptr[0]
+            cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+            cmd0.index_count = 24
+            cmd0.first_index = 0
+            cmd0.vertex_offset = 0
+            cmd0.instance_count = half_count
+            cmd0.first_instance = 0
+            ffi.copy(cmd0.push_constants, pc, 128)
+
+            -- COMMAND 1: The Asteroid Cubes (Second Half)
+            local cmd1 = current_queue_ptr[1]
+            cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+            cmd1.index_count = 36
+            cmd1.first_index = 24  -- Start reading after the 24 Ice Shard indices
+            cmd1.vertex_offset = 0
+            cmd1.instance_count = half_count
+            cmd1.first_instance = half_count -- Magic: Reads the second half of physics data!
+
+            -- Tint the cubes differently via PushConstants
+            local pc_cube = ffi.new("PushConstants")
+            ffi.copy(pc_cube, pc, 128)
+            pc_cube.target_state = 99 -- Hacky color flag for the shader
+            ffi.copy(cmd1.push_constants, pc_cube, 128)
+
+            -- 3. Bind the queue to the Ring Buffer packet
             packet.draw_queue = current_queue_ptr
-            packet.draw_count = 1
+            packet.draw_count = 2 -- Now telling C to loop twice!
 
-            -- Cross the boundary ONCE
+            -- 4. Cross the boundary ONCE
             ffi.C.vibe_ring_submit(write_idx)
 
             frame_count = frame_count + 1

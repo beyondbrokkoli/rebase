@@ -296,28 +296,21 @@ typedef struct {
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
-typedef struct {
-    uint32_t target_state;     // 4 bytes
-    uint32_t push_active;      // 4 bytes
-    uint32_t pull_active;      // 4 bytes
-    float mouse_x;             // 4 bytes
-    float mouse_y;             // 4 bytes
-    uint32_t _padding[3];      // 12 bytes
-} SwarmCommand;                // TOTAL: 32 bytes
-
 // ==========================================
 // DATA-ORIENTED RENDER QUEUE STRUCTS
 // ==========================================
 typedef struct {
-    uint64_t pipeline_id;      // 8 bytes
-    uint64_t descriptor_set;   // 8 bytes
-    uint32_t vertex_count;     // 4 bytes
-    uint32_t instance_count;   // 4 bytes
-    uint32_t first_vertex;     // 4 bytes
-    uint32_t first_instance;   // 4 bytes
-    uint8_t  push_constants[128]; // 128 bytes
-    uint8_t  _padding[32];     // 32 bytes padding to hit 192
-} DrawCommand;                 // TOTAL: 192 Bytes (Exactly 3 Cache Lines)
+    uint64_t pipeline_id;
+    uint64_t descriptor_set;
+    uint32_t index_count;       // Swapped from vertex_count
+    uint32_t instance_count;
+    uint32_t first_index;       // Swapped from first_vertex
+    int32_t  vertex_offset;     // NEW: Allows us to shift the starting vertex
+    uint32_t first_instance;
+    uint32_t _pad_cmd;          // NEW: Keeps the 8-byte alignment perfect
+    uint8_t  push_constants[128];
+    uint8_t  _padding[24];      // Adjusted to keep exactly 192 bytes
+} DrawCommand;
 
 _Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
 
@@ -492,6 +485,11 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     VkBuffer vbo = (VkBuffer)p->vertex_buffer;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
 
+    // --- BIND THE INDEX BUFFER ---
+    VkBuffer ibo = (VkBuffer)p->index_buffer;
+    // VK_INDEX_TYPE_UINT32 because we allocated our MASTER_INDEX_BLOCK as uint32_t
+    vkCmdBindIndexBuffer(cmd, ibo, 0, VK_INDEX_TYPE_UINT32);
+
     // 4. Data-Oriented Queue Execution
     uint64_t current_pipeline = 0;
     uint64_t current_descriptor = 0;
@@ -511,7 +509,14 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         }
 
         vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
-        vkCmdDraw(cmd, draw->vertex_count, draw->instance_count, draw->first_vertex, draw->first_instance);
+
+        vkCmdDrawIndexed(cmd,
+            draw->index_count,
+            draw->instance_count,
+            draw->first_index,
+            draw->vertex_offset,
+            draw->first_instance
+        );
     }
 
     pfnEnd(cmd);
