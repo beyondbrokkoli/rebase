@@ -169,7 +169,7 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     pipelineInfo[0].pMultisampleState = multisampling
     pipelineInfo[0].pDepthStencilState = depthStencil
     pipelineInfo[0].pColorBlendState = colorBlending
-    pipelineInfo[0].pDynamicState = dynamicStateInfo; -- Bind the dynamic override
+    pipelineInfo[0].pDynamicState = dynamicStateInfo -- Bind the dynamic override
     pipelineInfo[0].layout = pipelineLayout
 
     local pPipeline = ffi.new("VkPipeline[1]")
