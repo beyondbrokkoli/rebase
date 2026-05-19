@@ -106,24 +106,26 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local viewportState = ffi.new("VkPipelineViewportStateCreateInfo")
     ffi.fill(viewportState, ffi.sizeof(viewportState)); viewportState.sType = 22; viewportState.viewportCount = 1; viewportState.scissorCount = 1
 
-    -- 1. Rasterizer: Set to a neutral default
+    -- 1. Rasterizer: Set a VALID static default, NOT zero.
     local rasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo")
     ffi.fill(rasterizer, ffi.sizeof(rasterizer))
     rasterizer.sType = 23
-    rasterizer.polygonMode = 0
+    rasterizer.polygonMode = 0 -- VK_POLYGON_MODE_FILL
     rasterizer.lineWidth = 1.0
-    -- Set cullMode to NONE statically, so the dynamic state is free to override it
-    rasterizer.cullMode = 0 -- VK_CULL_MODE_NONE
+
+    -- SET THESE TO VALID DEFAULTS. Dynamic state will overwrite them anyway.
+    rasterizer.cullMode = 1 -- VK_CULL_MODE_FRONT_BIT (Something valid!)
     rasterizer.frontFace = 1 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
 
-    -- 2. DepthStencil: Set to neutral defaults
+    -- 2. DepthStencil: Set VALID static defaults.
     local depthStencil = ffi.new("VkPipelineDepthStencilStateCreateInfo")
     ffi.fill(depthStencil, ffi.sizeof(depthStencil))
     depthStencil.sType = 25
 
-    depthStencil.depthTestEnable = 0
-    depthStencil.depthWriteEnable = 0
-    depthStencil.depthCompareOp = 0
+    -- SET THESE TO VALID DEFAULTS.
+    depthStencil.depthTestEnable = 1
+    depthStencil.depthWriteEnable = 1
+    depthStencil.depthCompareOp = 1 -- VK_COMPARE_OP_LESS
 
     local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo")
     ffi.fill(multisampling, ffi.sizeof(multisampling)); multisampling.sType = 24; multisampling.rasterizationSamples = 1
