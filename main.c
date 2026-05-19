@@ -500,6 +500,7 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     PFN_vkCmdSetDepthTestEnable pfnDepthTest  = (PFN_vkCmdSetDepthTestEnable)g_wsi.pfnSetDepthTestEnable;
     PFN_vkCmdSetDepthWriteEnable pfnDepthWrite = (PFN_vkCmdSetDepthWriteEnable)g_wsi.pfnSetDepthWriteEnable;
     PFN_vkCmdSetDepthCompareOp  pfnDepthComp  = (PFN_vkCmdSetDepthCompareOp)g_wsi.pfnSetDepthCompareOp;
+    PFN_vkCmdSetFrontFace pfnFront = (PFN_vkCmdSetFrontFace)g_wsi.pfnSetFrontFace;
 
     // === SHADOW STATE INITIALIZATION ===
     // Initialized to invalid values to force an update on the first command.
@@ -511,6 +512,7 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     uint8_t  current_dtest = 0xFF;
     uint8_t  current_dwrite = 0xFF;
     uint8_t  current_dcomp = 0xFF;
+    uint8_t current_front = 0xFF; // Add this tracker
 
     for (uint32_t i = 0; i < count; i++) {
         DrawCommand* draw = &queue[i];
@@ -562,7 +564,10 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             pfnDepthComp(cmd, (VkCompareOp)draw->depth_compare);
             current_dcomp = draw->depth_compare;
         }
-
+        if (pfnFront && draw->front_face != current_front) {
+            pfnFront(cmd, (VkFrontFace)draw->front_face);
+            current_front = draw->front_face;
+        }
         // Execute Draw
         vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
         vkCmdDrawIndexed(cmd, draw->index_count, draw->instance_count, draw->first_index, draw->vertex_offset, draw->first_instance);
