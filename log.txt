@@ -1,36 +1,67 @@
-[GRAPHICS] Building Reverse-Z Depth Buffer and Shader Modules (Dynamic State Enabled)...
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCreateGraphicsPipelines(): pCreateInfos[0] pDynamicStates[4] is VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT but pDynamicStates[0] is VK_DYNAMIC_STATE_VIEWPORT.
-The Vulkan spec states: If the pipeline requires pre-rasterization shader state, and VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT is included in the pDynamicStates array then VK_DYNAMIC_STATE_VIEWPORT must not be present (https://docs.vulkan.org/spec/latest/chapters/pipelines.html#VUID-VkGraphicsPipelineCreateInfo-pDynamicStates-04132)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCreateGraphicsPipelines(): pCreateInfos[0].pViewportState->viewportCount (1) must be zero when VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT is used.
-The Vulkan spec states: If the pipeline requires pre-rasterization shader state, and VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT is included in the pDynamicStates array then viewportCount must be zero (https://docs.vulkan.org/spec/latest/chapters/pipelines.html#VUID-VkGraphicsPipelineCreateInfo-pDynamicStates-03379)
-
-[GRAPHICS] Swarm Pipeline Successfully Compiled with Dynamic States!
-[RENDERER] Forging Synchronization Primitives...
-[C-CORE] Async Render Thread Online.
-[LUA CO] Compiling Geometry...
 [LUA CO] Entering Flattened Render Loop...
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT state is dynamic, but the command buffer never called vkCmdSetViewportWithCount.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT dynamic state enabled, and the state is not inherited, then vkCmdSetViewportWithCount must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-viewportCount-03417)
+MESSAGE: vkAcquireNextImageKHR(): Semaphore must not have any pending operations.
+The Vulkan spec states: If semaphore is not VK_NULL_HANDLE, it must not have any uncompleted signal or wait operations pending (https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html#VUID-vkAcquireNextImageKHR-semaphore-01779)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
+MESSAGE: vkResetFences(): pFences[0] (VkFence 0x2f000000002f) is in use.
+The Vulkan spec states: Each element of pFences must not be currently associated with any queue command that has not yet completed execution on that queue (https://docs.vulkan.org/spec/latest/chapters/synchronization.html#VUID-vkResetFences-pFences-01123)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT state is dynamic, but the command buffer never called vkCmdSetViewportWithCount.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT dynamic state enabled, and the state is not inherited, then vkCmdSetViewportWithCount must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-viewportCount-03417)
+MESSAGE: vkResetCommandBuffer(): (VkCommandBuffer 0x2c98169a788) is in use.
+The Vulkan spec states: commandBuffer must not be in the pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkResetCommandBuffer-commandBuffer-00045)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkBeginCommandBuffer(): on active VkCommandBuffer 0x2c98169a788 before it has completed. You must check command buffer fence before this call.
+The Vulkan spec states: commandBuffer must not be in the recording or pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkBeginCommandBuffer-commandBuffer-00049)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): pSubmits[0].pCommandBuffers[0] VkCommandBuffer 0x2c98169a788 is already in use and is not marked for simultaneous use.
+The Vulkan spec states: If any element of the pCommandBuffers member of any element of pSubmits was not recorded with the VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT, it must not be in the pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pCommandBuffers-00071)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): pSubmits[0].pWaitSemaphores[0] queue (VkQueue 0x2c9e9a736f8) is waiting on semaphore (VkSemaphore 0x1c000000001c) that has no way to be signaled.
+The Vulkan spec states: All elements of the pWaitSemaphores member of all elements of pSubmits created with a VkSemaphoreType of VK_SEMAPHORE_TYPE_BINARY must reference a semaphore signal operation that has been submitted for execution and any semaphore signal operations on which it depends must have also been submitted for execution (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pWaitSemaphores-03238)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): pSubmits[0].pSignalSemaphores[0] (VkSemaphore 0x1b000000001b) is being signaled by VkQueue 0x2c9e9a736f8, but it was previously signaled by VkQueue 0x2c9e9a736f8 and has not since been waited on.
+The Vulkan spec states: Each binary semaphore element of the pSignalSemaphores member of any element of pSubmits must be unsignaled when the semaphore signal operation it defines is executed on the device (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pSignalSemaphores-00067)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkAcquireNextImageKHR(): Semaphore must not have any pending operations.
+The Vulkan spec states: If semaphore is not VK_NULL_HANDLE, it must not have any uncompleted signal or wait operations pending (https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html#VUID-vkAcquireNextImageKHR-semaphore-01779)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkResetFences(): pFences[0] (VkFence 0x300000000030) is in use.
+The Vulkan spec states: Each element of pFences must not be currently associated with any queue command that has not yet completed execution on that queue (https://docs.vulkan.org/spec/latest/chapters/synchronization.html#VUID-vkResetFences-pFences-01123)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkResetCommandBuffer(): (VkCommandBuffer 0x2c9816a4b48) is in use.
+The Vulkan spec states: commandBuffer must not be in the pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkResetCommandBuffer-commandBuffer-00045)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkBeginCommandBuffer(): on active VkCommandBuffer 0x2c9816a4b48 before it has completed. You must check command buffer fence before this call.
+The Vulkan spec states: commandBuffer must not be in the recording or pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkBeginCommandBuffer-commandBuffer-00049)
 
