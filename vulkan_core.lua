@@ -140,7 +140,8 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
         "VK_KHR_create_renderpass2",
         "VK_KHR_multiview",
         "VK_KHR_maintenance2",
-        "VK_EXT_extended_dynamic_state" -- The missing extension
+        "VK_EXT_extended_dynamic_state", -- The missing extension
+--        "VK_EXT_extended_dynamic_state2" -- Depth states live here!
     })
 
     -- Enable Dynamic Rendering Feature struct
