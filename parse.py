@@ -102,9 +102,7 @@ def generate_lua_ffi_cdef(xml_path):
                 # Strip out C-specific suffixes like 'U' or 'ULL' (e.g. 32U -> 32)
                 api_constants[name] = value.replace('U', '').replace('L', '')
 
-    # ========================================================
     # [THE PATCH] 0.5 Grab the actual Enum Values!
-    # ========================================================
     ffi_declarations.append("\n// --- Enum Values ---")
     ffi_declarations.append("enum {")
 
@@ -121,7 +119,26 @@ def generate_lua_ffi_cdef(xml_path):
             if name and value:
                 ffi_declarations.append(f"    {name} = {value},")
 
-    ffi_declarations.append("};")
+    # [THE PATCH PART 2] Extract Extension Enum Values dynamically
+    for ext in root.findall('.//extensions/extension'):
+        ext_number = int(ext.get('number', 0))
+        if ext_number == 0:
+            continue
+
+        for req in ext.findall('require'):
+            for enum_tag in req.findall('enum'):
+                if enum_tag.get('extends') and enum_tag.get('offset'):
+                    name = enum_tag.get('name')
+                    offset = int(enum_tag.get('offset'))
+                    # Handle negative offsets (dir="-")
+                    direction = -1 if enum_tag.get('dir') == '-' else 1
+
+                    # Vulkan Extension Formula
+                    val = direction * (1000000000 + (ext_number - 1) * 1000 + offset)
+                    ffi_declarations.append(f"    {name} = {val},")
+
+    ffi_declarations.append("};") # <--- CLOSES THE ENUM BLOCK!
+
     # 1. Grab Handles
     ffi_declarations.append("// --- Handles ---")
     for handle in root.findall('.//types/type[@category="handle"]'):
