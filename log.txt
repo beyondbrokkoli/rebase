@@ -1,19 +1,69 @@
-[LUA FATAL ERROR] .\vulkan_headers.lua:5370: invalid C type at line 3730
+AzureAD+HalimOmarZaghdoudi@DESKTOP-BD3FFTI MINGW64 ~/rebase
+$ git pull
+remote: Enumerating objects: 7, done.
+remote: Counting objects: 100% (7/7), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 4 (delta 3), reused 4 (delta 3), pack-reused 0 (from 0)
+Unpacking objects: 100% (4/4), 1.80 KiB | 33.00 KiB/s, done.
+From https://github.com/beyondbrokkoli/rebase
+   bf0c691..f1f8461  main       -> origin/main
+Updating bf0c691..f1f8461
+Fast-forward
+ parse.py           |   32 ++---
+ vulkan_headers.lua | 1073 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++---------------------------------------------------------------------
+ 2 files changed, 552 insertions(+), 553 deletions(-)
 
--- from line 3730 onwards
-static const uint64_t VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT = 0x400000000000ULL;
-static const uint64_t VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR = 0x800000000ULL;
-static const uint64_t VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR = 0x1000000000ULL;
-static const uint64_t VK_PIPELINE_CREATE_2_RESERVED_46_BIT_IMG = 0x400000000000ULL;
-static const uint64_t VK_PIPELINE_CREATE_2_EXECUTION_GRAPH_BIT_AMDX = 0x100000000ULL;
-static const uint64_t VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT = 0x1000000000ULL;
-static const uint64_t VK_ACCESS_2_SAMPLER_HEAP_READ_BIT_EXT = 0x200000000000000ULL;
-static const uint64_t VK_ACCESS_2_RESOURCE_HEAP_READ_BIT_EXT = 0x400000000000000ULL;
-static const uint64_t VK_ACCESS_2_RESERVED_46_BIT_INTEL = 0x400000000000ULL;
-static const uint64_t VK_PIPELINE_CREATE_RESERVED_44_BIT_KHR = 0x100000000000ULL;
-static const uint64_t VK_ACCESS_2_VIDEO_ENCODE_READ_BIT_KHR = 0x2000000000ULL;
-static const uint64_t VK_ACCESS_2_VIDEO_ENCODE_WRITE_BIT_KHR = 0x4000000000ULL;
-static const uint64_t VK_FORMAT_FEATURE_2_BLOCK_MATCHING_SXD_BIT_QCOM = 0x100000000000ULL;
-static const uint64_t VK_PIPELINE_STAGE_2_RESERVED_50_BIT_KHR = 0x4000000000000ULL;
-static const uint64_t VK_ACCESS_2_RESERVED_53_BIT_KHR = 0x20000000000000ULL;
-static const uint64_t VK_ACCESS_2_RESERVED_54_BIT_KHR = 0x40000000000000ULL;
+AzureAD+HalimOmarZaghdoudi@DESKTOP-BD3FFTI MINGW64 ~/rebase
+$ ./boot.exe
+[C-CORE] Booting Headless Worker...
+[LUA-OS-THREAD] Booting Lua VM...
+[LUA IO] Booting Headless...
+[LUA] Initializing Vulkan Core (Instance Generation)...
+[LUA] Vulkan Instance Created!
+[C-CORE] Validation Layer Enforcer Injected Successfully!
+[LUA IO] Ordering C-Core to Boot GLFW Window...
+[C-CORE] Window & Surface Created on Lua's Demand!
+[LUA] Resuming Vulkan Setup. Finalizing Logical Device...
+[LUA] Window Surface Linked from Main Thread!
+[LUA] Hardware GPU Selected!
+[LUA] Logical Device Created!
+[DEBUG] Device Pointer in core: cdata<struct VkDevice_T *>: 0x01e075e0a258
+[MEMORY] ReBAR Supported! Streaming directly to VRAM.
+[MEMORY] Allocated & Mapped VRAM Buffer: MASTER_INDEX_BLOCK (45.78 MB)
+[MEMORY] Allocated Fast CPU RAM: px (3.05 MB)
+[MEMORY] Allocated Fast CPU RAM: py (3.05 MB)
+[MEMORY] Allocated Fast CPU RAM: pz (3.05 MB)
+[MEMORY] Allocated Fast CPU RAM: vx (3.05 MB)
+[MEMORY] Allocated Fast CPU RAM: vy (3.05 MB)
+[MEMORY] Allocated Fast CPU RAM: vz (3.05 MB)
+[MEMORY] Allocated Fast CPU RAM: seed (3.05 MB)
+[MEMORY] ReBAR Supported! Streaming directly to VRAM.
+[MEMORY] Allocated & Mapped VRAM Buffer: MASTER_GPU_BLOCK (27.47 MB)
+[SWAPCHAIN] Building the display chain...
+[SWAPCHAIN] Created successfully with 3 images!
+[DESCRIPTORS] Wiring Master VRAM Arena as a Unified SSBO...
+[DESCRIPTORS] Unified Memory Matrix successfully bound!
+[COMPUTE] Compiling Swarm Intelligence...
+[COMPUTE] Swarm Pipeline Ready!
+[GRAPHICS] Building Reverse-Z Depth Buffer and Shader Modules...
+[GRAPHICS] Swarm Pipeline Successfully Compiled!
+[RENDERER] Forging Synchronization Primitives...
+[LUA CO] Compiling Geometry...
+[C-CORE] Async Render Thread Online.
+[LUA CO] Entering Flattened Render Loop...
+[LUA IO] ESCAPE PRESSED. Executing Teardown...
+
+[C-CORE] Shutdown triggered. Waiting for Lua VM...
+[LUA CO] Render Loop Terminated. Frames: 895
+[TEARDOWN] Terminating Async Render Thread...
+[C-CORE] Async Render Thread gracefully terminated and pool destroyed.
+[C-CORE] Async Render Thread gracefully terminated for rebuild.
+[TEARDOWN] Dismantling Renderer Sync Objects...
+[TEARDOWN] Destroying Graphics Pipeline & Depth Buffer...
+[TEARDOWN] Destroying Compute Pipeline...
+[TEARDOWN] Deconstructing Descriptors...
+[TEARDOWN] Destroying Swapchain & Image Views...
+[TEARDOWN] Freeing VRAM Arenas...
+[TEARDOWN] Shutting down Vulkan Core...
+[LUA-OS-THREAD] VM Destroyed.
+[C-CORE] Clean Exit.
