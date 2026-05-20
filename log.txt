@@ -1,18 +1,4 @@
-Updating e1b74c0..3bb22fe
-Fast-forward
- parse.py           |   52 +-
- vulkan_headers.lua | 2101 ++++++++++++++++++++++++++++++++++++++++-------------
- 2 files changed, 1619 insertions(+), 534 deletions(-)
-
-AzureAD+HalimOmarZaghdoudi@DESKTOP-BD3FFTI MINGW64 ~/rebase
-$ ./boot.exe
-[C-CORE] Booting Headless Worker...
-[LUA-OS-THREAD] Booting Lua VM...
-
-[LUA FATAL ERROR] .\vulkan_headers.lua:4972: unexpected symbol near 'VK_PIPELINE_CREATE_DISPATCH_BASE_BIT' at line 1127
-[LUA-OS-THREAD] VM Destroyed.
+[LUA FATAL ERROR] .\vulkan_headers.lua:5524: malformed number near '70368744177664' at line 1382
 
 
-AzureAD+HalimOmarZaghdoudi@DESKTOP-BD3FFTI MINGW64 ~/rebase
-$ wc -l vulkan_headers.lua
-4973 vulkan_headers.lua
+    VK_STRUCTURE_TYPE_HOST_IMAGE_COPY_DEVICE_PERFORMANCE_QUERY = 1000270009,
