@@ -84,28 +84,37 @@ function core.create_instance()
     }
 end
 
+-- PART 2: Logical Device & Queue Generation (After the Yield)
 function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     print("[LUA] Resuming Vulkan Setup. Finalizing Logical Device...")
+
     local vk = vk_state.vk
     local instance = vk_state.instance
+
+    -- 5. Cast the raw pointer from C back into a VkSurfaceKHR
     local surface = ffi.cast("VkSurfaceKHR", surface_ptr)
     vk_state.surface = surface
     print("[LUA] Window Surface Linked from Main Thread!")
 
+    -- 6. Find the GPU
     local pDeviceCount = ffi.new("uint32_t[1]")
     vk.vkEnumeratePhysicalDevices(instance, pDeviceCount, nil)
     local pDevices = ffi.new("VkPhysicalDevice[?]", pDeviceCount[0])
     vk.vkEnumeratePhysicalDevices(instance, pDeviceCount, pDevices)
-    local physicalDevice = pDevices[0]
+
+    local physicalDevice = pDevices[0] -- Just grab the first GPU for now
     vk_state.physicalDevice = physicalDevice
     print("[LUA] Hardware GPU Selected!")
 
+    -- 7. Find the Graphics/Compute Queue Family
     local pQueueFamilyCount = ffi.new("uint32_t[1]")
     vk.vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, pQueueFamilyCount, nil)
     local queueFamilies = ffi.new("VkQueueFamilyProperties[?]", pQueueFamilyCount[0])
     vk.vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, pQueueFamilyCount, queueFamilies)
+
     local qIndex = -1
     for i = 0, pQueueFamilyCount[0] - 1 do
+        -- VK_QUEUE_GRAPHICS_BIT is 1. (It guarantees Compute support too!)
         if bit.band(queueFamilies[i].queueFlags, 1) ~= 0 then
             qIndex = i
             break
@@ -114,49 +123,43 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     assert(qIndex ~= -1, "FATAL: Could not find a Graphics/Compute queue!")
     vk_state.qIndex = qIndex
 
+    -- 8. Create the Logical Device
     local queuePriority = ffi.new("float[1]", 1.0)
     local queueCreateInfo = ffi.new("VkDeviceQueueCreateInfo", {
-        sType = 2,
+        sType = 2, -- VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
         queueFamilyIndex = qIndex,
         queueCount = 1,
         pQueuePriorities = queuePriority
     })
 
-    -- INCREASED EXTENSION COUNT TO 7
-    local deviceExtensions = ffi.new("const char*[7]", {
+    -- Enable Swapchain, Dynamic Rendering, and the entire dependency tree!
+    local deviceExtensions = ffi.new("const char*[6]", {
         "VK_KHR_swapchain",
         "VK_KHR_dynamic_rendering",
         "VK_KHR_depth_stencil_resolve",
         "VK_KHR_create_renderpass2",
         "VK_KHR_multiview",
-        "VK_KHR_maintenance2",
-        "VK_EXT_extended_dynamic_state" -- NEW: Required for dynamic Cull/Depth states
+        "VK_KHR_maintenance2"
     })
 
-    -- NEW: Extended Dynamic State Feature Struct
-    local extDynamicState = ffi.new("VkPhysicalDeviceExtendedDynamicStateFeaturesEXT", {
-        sType = 1000267000,
-        extendedDynamicState = 1,
-        pNext = nil
-    })
-
-    -- LINKED: Chaining extDynamicState into dynamicRendering's pNext
+    -- Enable Dynamic Rendering Feature struct
     local dynamicRendering = ffi.new("VkPhysicalDeviceDynamicRenderingFeatures", {
-        sType = 1000044003,
-        dynamicRendering = 1,
-        pNext = extDynamicState
+        sType = 1000044003, -- VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES
+        dynamicRendering = 1 -- VK_TRUE
     })
 
+    -- Request Physical Device Features (like Large Points)
     local deviceFeatures = ffi.new("VkPhysicalDeviceFeatures")
     ffi.fill(deviceFeatures, ffi.sizeof(deviceFeatures))
-    deviceFeatures.largePoints = 1
+    deviceFeatures.largePoints = 1 -- VK_TRUE: Allows gl_PointSize > 1.0!
 
+    -- Hook it into the Device Create Info
     local deviceCreateInfo = ffi.new("VkDeviceCreateInfo", {
-        sType = 3,
+        sType = 3, -- VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
         pNext = dynamicRendering,
         queueCreateInfoCount = 1,
         pQueueCreateInfos = queueCreateInfo,
-        enabledExtensionCount = 7, -- UPDATED COUNT
+        enabledExtensionCount = 6,
         ppEnabledExtensionNames = deviceExtensions,
         pEnabledFeatures = deviceFeatures
     })
@@ -168,11 +171,17 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     vk_state.device = device
     print("[LUA] Logical Device Created!")
 
+    -- 9. Grab the Command Queue
     local pQueue = ffi.new("VkQueue[1]")
     vk.vkGetDeviceQueue(device, qIndex, 0, pQueue)
     vk_state.queue = pQueue[0]
+
+    print("[DEBUG] Device Pointer in core: " .. tostring(device))
+
+    -- We pass the fully loaded state back to main.lua
     return vk_state
 end
+
 -- TEARDOWN
 function core.Destroy(vk_state)
     print("[TEARDOWN] Shutting down Vulkan Core...")

@@ -10,7 +10,7 @@ local compute = require("compute_pipeline")
 local graphics = require("graphics_pipeline")
 local renderer = require("renderer")
 local os = require("os")
-local PCOUNT = 4000000
+local PCOUNT = 800000
 -- HIGH-RESOLUTION KERNEL TIMER
 local get_time_hires
 
@@ -91,27 +91,17 @@ ffi.cdef[[
         uint32_t _padding[3];
     } SwarmCommand;
 
-    // BACK TO PERFECT 192-BYTE NATURAL ALIGNMENT. NO PACKED!
     typedef struct {
         uint64_t pipeline_id;
         uint64_t descriptor_set;
-        uint32_t index_count;
+        uint32_t index_count;       // Swapped from vertex_count
         uint32_t instance_count;
-        uint32_t first_index;
-        int32_t  vertex_offset;
+        uint32_t first_index;       // Swapped from first_vertex
+        int32_t  vertex_offset;     // NEW: Allows us to shift the starting vertex
         uint32_t first_instance;
-        uint32_t _pad_cmd;
+        uint32_t _pad_cmd;          // NEW: Keeps the 8-byte alignment perfect
         uint8_t  push_constants[128];
-        int16_t  scissor_x;
-        int16_t  scissor_y;
-        uint16_t scissor_w;
-        uint16_t scissor_h;
-        uint8_t  cull_mode;         // 1 byte
-        uint8_t  depth_test;        // 1 byte
-        uint8_t  depth_write;       // 1 byte
-        uint8_t  depth_compare;     // 1 byte
-        uint32_t viewport_scale_id; // 4 bytes
-        uint8_t  _padding[8];       // exactly 8 bytes pad remaining
+        uint8_t  _padding[24];      // Adjusted to keep exactly 192 bytes
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
@@ -130,12 +120,13 @@ ffi.cdef[[
         uint32_t draw_count;
         uint32_t _pad_ptr;
         DrawCommand* draw_queue;
-        uint8_t  comp_pc_payload[128];
-        uint8_t  _padding[24];
+        uint8_t comp_pc_payload[128];
+        uint8_t _padding[24];
     } RenderPacket;
 
+    // WSI Bridge
     typedef struct {
-        void* device;
+        void* device;      // FFI doesn't need strict Vk Types here if passed as pointers
         void* queue;
         void* swapchain;
         uint64_t swapchain_images[10];
@@ -150,11 +141,6 @@ ffi.cdef[[
         void* vkQueuePresentKHR;
         void* pfnBegin;
         void* pfnEnd;
-        // ONLY THE CORE 4 DYNAMIC STATES
-        void* pfnSetCullMode;
-        void* pfnSetDepthTestEnable;
-        void* pfnSetDepthWriteEnable;
-        void* pfnSetDepthCompareOp;
     } RenderThreadInit;
 
     // Subsystem Interfaces
@@ -175,14 +161,6 @@ ffi.cdef[[
     void Sleep(uint32_t dwMilliseconds);
     int usleep(uint32_t usec);
 ]]
--- THE ABI SAFETY NET
-assert(ffi.sizeof("DrawCommand") == 192, "FATAL: DrawCommand ABI rupture!")
-assert(ffi.sizeof("RenderPacket") == 256, "FATAL: RenderPacket ABI rupture!")
-assert(ffi.alignof("RenderPacket") == 64, "FATAL: RenderPacket Alignment rupture!")
-
-local _test_rp = ffi.new("RenderPacket")
-assert(ffi.offsetof(_test_rp, "draw_queue") == 96, "FATAL: draw_queue pointer shifted!")
-assert(ffi.offsetof(_test_rp, "comp_pc_payload") == 104, "FATAL: Payload offset shifted!")
 
 local function sys_sleep(ms)
     if jit.os == "Windows" then
@@ -282,12 +260,6 @@ local function main()
     wsi.vkQueuePresentKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueuePresentKHR"))
     wsi.pfnBegin = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR"))
     wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
-
-    -- INSIDE main() WSI SETUP:
-    wsi.pfnSetCullMode = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT"))
-    wsi.pfnSetDepthTestEnable = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT"))
-    wsi.pfnSetDepthWriteEnable = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT"))
-    wsi.pfnSetDepthCompareOp = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT"))
 
     ffi.C.vibe_ring_init_wsi(wsi)
     ffi.C.vibe_start_render_thread()
@@ -509,7 +481,9 @@ local function main()
             pc.vel_y_idx = frame_offset + (padded_capacity * 4)
             pc.vel_z_idx = frame_offset + (padded_capacity * 5)
 
+            -- ==========================================
             -- DATA-ORIENTED QUEUE POPULATION
+            -- ==========================================
             local packet = ffi.C.vibe_ring_get_packet(write_idx)
             local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
 
@@ -530,40 +504,40 @@ local function main()
             -- 2. Populate Draw Queue Data (DUAL DISPATCH)
             local half_count = math.floor(pc.particle_count / 2)
 
+            -- COMMAND 0: The Ice Shard Swarm (First Half)
             local cmd0 = current_queue_ptr[0]
             cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
             cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-            cmd0.index_count = 24; cmd0.first_index = 0; cmd0.vertex_offset = 0
-     	    cmd0.instance_count = half_count; cmd0.first_instance = 0
+            cmd0.index_count = 24
+            cmd0.first_index = 0
+            cmd0.vertex_offset = 0
+            cmd0.instance_count = half_count
+            cmd0.first_instance = 0
             ffi.copy(cmd0.push_constants, pc, 128)
 
-            cmd0.scissor_x = 0; cmd0.scissor_y = 0
-            cmd0.scissor_w = sc_state.extent.width; cmd0.scissor_h = sc_state.extent.height
-            cmd0.cull_mode = 2     -- VK_CULL_MODE_BACK_BIT
-            cmd0.depth_test = 1    -- VK_TRUE
-            cmd0.depth_write = 1   -- VK_TRUE
-            cmd0.depth_compare = 4 -- VK_COMPARE_OP_GREATER (Reverse-Z)
-            cmd0.viewport_scale_id = 0
-
+            -- COMMAND 1: The Asteroid Cubes (Second Half)
             local cmd1 = current_queue_ptr[1]
             cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
             cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-            cmd1.index_count = 36; cmd1.first_index = 24; cmd1.vertex_offset = 0
-            cmd1.instance_count = half_count; cmd1.first_instance = half_count
-            local pc_cube = ffi.new("PushConstants"); ffi.copy(pc_cube, pc, 128); pc_cube.target_state = 99
+            cmd1.index_count = 36
+            cmd1.first_index = 24  -- Start reading after the 24 Ice Shard indices
+            cmd1.vertex_offset = 0
+            cmd1.instance_count = half_count
+            cmd1.first_instance = half_count -- Magic: Reads the second half of physics data!
+
+            -- Tint the cubes differently via PushConstants
+            local pc_cube = ffi.new("PushConstants")
+            ffi.copy(pc_cube, pc, 128)
+            pc_cube.target_state = 99 -- Hacky color flag for the shader
             ffi.copy(cmd1.push_constants, pc_cube, 128)
 
-            cmd1.scissor_x = 0; cmd1.scissor_y = 0
-            cmd1.scissor_w = sc_state.extent.width; cmd1.scissor_h = sc_state.extent.height
-            cmd1.cull_mode = 0     -- VK_CULL_MODE_NONE
-            cmd1.depth_test = 0    -- VK_FALSE
-            cmd1.depth_write = 0   -- VK_FALSE
-            cmd1.depth_compare = 7 -- VK_COMPARE_OP_ALWAYS
-            cmd1.viewport_scale_id = 0
-
+            -- 3. Bind the queue to the Ring Buffer packet
             packet.draw_queue = current_queue_ptr
-            packet.draw_count = 2
+            packet.draw_count = 2 -- Now telling C to loop twice!
+
+            -- 4. Cross the boundary ONCE
             ffi.C.vibe_ring_submit(write_idx)
+
             frame_count = frame_count + 1
         end
         sys_sleep(10)

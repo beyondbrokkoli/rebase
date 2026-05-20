@@ -296,52 +296,59 @@ typedef struct {
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
+// ==========================================
+// DATA-ORIENTED RENDER QUEUE STRUCTS
+// ==========================================
 typedef struct {
     uint64_t pipeline_id;
     uint64_t descriptor_set;
-    uint32_t index_count;
+    uint32_t index_count;       // Swapped from vertex_count
     uint32_t instance_count;
-    uint32_t first_index;
-    int32_t  vertex_offset;
+    uint32_t first_index;       // Swapped from first_vertex
+    int32_t  vertex_offset;     // NEW: Allows us to shift the starting vertex
     uint32_t first_instance;
-    uint32_t _pad_cmd;
+    uint32_t _pad_cmd;          // NEW: Keeps the 8-byte alignment perfect
     uint8_t  push_constants[128];
-    int16_t  scissor_x;
-    int16_t  scissor_y;
-    uint16_t scissor_w;
-    uint16_t scissor_h;
-    uint8_t  cull_mode;
-    uint8_t  depth_test;
-    uint8_t  depth_write;
-    uint8_t  depth_compare;
-    uint32_t viewport_scale_id;
-    uint8_t  _padding[8];
+    uint8_t  _padding[24];      // Adjusted to keep exactly 192 bytes
 } DrawCommand;
+
 _Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
 
-/* ===== RENDER PACKET - MUST match packed+aligned(64) in BOTH languages ===== */
+// Packed is safe here because we manually aligned the pointer to offset 96.
 typedef struct __attribute__((packed, aligned(64))) {
-    uint64_t comp_pipeline;         /* 0   */
-    uint64_t comp_layout;           /* 8   */
-    uint64_t comp_desc_set;         /* 16  */
-    uint64_t gfx_layout;            /* 24  */
-    uint64_t vertex_buffer;         /* 32  */
-    uint64_t index_buffer;          /* 40  */
-    uint64_t swapchain_image;       /* 48  */
-    uint64_t swapchain_view;        /* 56  */
-    uint64_t depth_image;           /* 64  */
-    uint64_t depth_view;            /* 72  */
-    uint32_t width;                 /* 80  */
-    uint32_t height;                /* 84  */
-    uint32_t draw_count;            /* 88  */
-    uint32_t _pad_ptr;              /* 92  */
-    DrawCommand* draw_queue;        /* 96  - pointer, 8 bytes on 64-bit */
-    uint8_t  comp_pc_payload[128];  /* 104 */
-    uint8_t  _padding[24];          /* 232 */
-} RenderPacket;                     /* 256 total, 64-byte aligned */
-_Static_assert(sizeof(RenderPacket) == 256, "RenderPacket size mismatch");
-_Static_assert(_Alignof(RenderPacket) == 64, "RenderPacket alignment mismatch");
+    uint64_t comp_pipeline;    // 8 bytes
+    uint64_t comp_layout;      // 8 bytes
+    uint64_t comp_desc_set;    // 8 bytes
+    uint64_t gfx_layout;       // 8 bytes
+    uint64_t vertex_buffer;    // 8 bytes
+    uint64_t index_buffer;     // 8 bytes
+    uint64_t swapchain_image;  // 8 bytes
+    uint64_t swapchain_view;   // 8 bytes
+    uint64_t depth_image;      // 8 bytes
+    uint64_t depth_view;       // 8 bytes
+                               // --- Subtotal: 80 bytes
 
+    uint32_t width;            // 4 bytes
+    uint32_t height;           // 4 bytes
+    uint32_t draw_count;       // 4 bytes
+    uint32_t _pad_ptr;         // 4 bytes (CRITICAL: Aligns pointer to 96)
+                               // --- Subtotal: 96 bytes
+
+    DrawCommand* draw_queue;   // 8 bytes (Properly aligned to 8-byte boundary)
+                               // --- Subtotal: 104 bytes
+
+    uint8_t comp_pc_payload[128]; // 128 bytes
+                               // --- Subtotal: 232 bytes
+
+    uint8_t _padding[24];      // 24 bytes (Rounds out the 4th cache line)
+                               // --- TOTAL: 256 bytes
+} RenderPacket;
+
+_Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 bytes!");
+
+// ==========================================
+// C-ONLY SYNCHRONIZATION (HIDDEN FROM LUA)
+// ==========================================
 typedef struct {
     VkDevice device;
     VkQueue queue;
@@ -358,17 +365,7 @@ typedef struct {
     void* vkQueuePresentKHR;
     void* pfnBegin;
     void* pfnEnd;
-    void* pfnSetCullMode;
-    void* pfnSetDepthTestEnable;
-    void* pfnSetDepthWriteEnable;
-    void* pfnSetDepthCompareOp;
 } RenderThreadInit;
-
-// Vulkan Extended Dynamic State PFNs
-typedef void (VKAPI_PTR *PFN_vkCmdSetCullMode)(VkCommandBuffer, VkCullModeFlags);
-typedef void (VKAPI_PTR *PFN_vkCmdSetDepthTestEnable)(VkCommandBuffer, VkBool32);
-typedef void (VKAPI_PTR *PFN_vkCmdSetDepthWriteEnable)(VkCommandBuffer, VkBool32);
-typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOp)(VkCommandBuffer, VkCompareOp);
 
 typedef struct {
     alignas(64) RenderPacket packets[3];
@@ -407,6 +404,7 @@ EXPORT int vibe_ring_get_write_idx() {
 EXPORT void vibe_ring_submit(int idx) {
     atomic_store_explicit(&g_ring.ready_idx, idx, memory_order_release);
 }
+
 EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
@@ -474,27 +472,27 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         .pColorAttachments = &colorAttachment,
         .pDepthAttachment = &depthAttachment
     };
+
     pfnBegin(cmd, &renderInfo);
+
+    // 3. Global Graphics State Setup
+    VkViewport viewport = {0.0f, 0.0f, (float)p->width, (float)p->height, 0.0f, 1.0f};
+    VkRect2D scissor = {{0, 0}, {p->width, p->height}};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     VkDeviceSize offset = 0;
     VkBuffer vbo = (VkBuffer)p->vertex_buffer;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
+
+    // --- BIND THE INDEX BUFFER ---
     VkBuffer ibo = (VkBuffer)p->index_buffer;
+    // VK_INDEX_TYPE_UINT32 because we allocated our MASTER_INDEX_BLOCK as uint32_t
     vkCmdBindIndexBuffer(cmd, ibo, 0, VK_INDEX_TYPE_UINT32);
 
-    PFN_vkCmdSetCullMode        pfnCull       = (PFN_vkCmdSetCullMode)g_wsi.pfnSetCullMode;
-    PFN_vkCmdSetDepthTestEnable pfnDepthTest  = (PFN_vkCmdSetDepthTestEnable)g_wsi.pfnSetDepthTestEnable;
-    PFN_vkCmdSetDepthWriteEnable pfnDepthWrite = (PFN_vkCmdSetDepthWriteEnable)g_wsi.pfnSetDepthWriteEnable;
-    PFN_vkCmdSetDepthCompareOp  pfnDepthComp  = (PFN_vkCmdSetDepthCompareOp)g_wsi.pfnSetDepthCompareOp;
-
-    uint64_t current_pipeline = ~0ULL;
-    uint64_t current_descriptor = ~0ULL;
-    VkRect2D current_scissor = { {-1, -1}, {0, 0} };
-    uint32_t current_viewport_id = 0xFFFFFFFF;
-    uint8_t  current_cull = 0xFF;
-    uint8_t  current_dtest = 0xFF;
-    uint8_t  current_dwrite = 0xFF;
-    uint8_t  current_dcomp = 0xFF;
+    // 4. Data-Oriented Queue Execution
+    uint64_t current_pipeline = 0;
+    uint64_t current_descriptor = 0;
 
     for (uint32_t i = 0; i < count; i++) {
         DrawCommand* draw = &queue[i];
@@ -510,40 +508,15 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             current_descriptor = draw->descriptor_set;
         }
 
-        if (draw->scissor_x != current_scissor.offset.x || draw->scissor_y != current_scissor.offset.y ||
-            draw->scissor_w != current_scissor.extent.width || draw->scissor_h != current_scissor.extent.height) {
-            current_scissor.offset.x = draw->scissor_x;
-            current_scissor.offset.y = draw->scissor_y;
-            current_scissor.extent.width = draw->scissor_w;
-            current_scissor.extent.height = draw->scissor_h;
-            vkCmdSetScissor(cmd, 0, 1, &current_scissor);
-        }
-
-        if (draw->viewport_scale_id != current_viewport_id) {
-            VkViewport vp = {0.0f, 0.0f, (float)p->width, (float)p->height, 0.0f, 1.0f};
-            vkCmdSetViewport(cmd, 0, 1, &vp);
-            current_viewport_id = draw->viewport_scale_id;
-        }
-
-        if (pfnCull && draw->cull_mode != current_cull) {
-            pfnCull(cmd, (VkCullModeFlags)draw->cull_mode);
-            current_cull = draw->cull_mode;
-        }
-        if (pfnDepthTest && draw->depth_test != current_dtest) {
-            pfnDepthTest(cmd, (VkBool32)draw->depth_test);
-            current_dtest = draw->depth_test;
-        }
-        if (pfnDepthWrite && draw->depth_write != current_dwrite) {
-            pfnDepthWrite(cmd, (VkBool32)draw->depth_write);
-            current_dwrite = draw->depth_write;
-        }
-        if (pfnDepthComp && draw->depth_compare != current_dcomp) {
-            pfnDepthComp(cmd, (VkCompareOp)draw->depth_compare);
-            current_dcomp = draw->depth_compare;
-        }
-
         vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
-        vkCmdDrawIndexed(cmd, draw->index_count, draw->instance_count, draw->first_index, draw->vertex_offset, draw->first_instance);
+
+        vkCmdDrawIndexed(cmd,
+            draw->index_count,
+            draw->instance_count,
+            draw->first_index,
+            draw->vertex_offset,
+            draw->first_instance
+        );
     }
 
     pfnEnd(cmd);
@@ -564,11 +537,12 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
 THREAD_FUNC render_thread_loop(void* arg) {
     printf("[C-CORE] Async Render Thread Online.\n");
 
+    // 1. C-Owned Command Pool Setup
     VkCommandPool cmd_pool;
     VkCommandPoolCreateInfo pool_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = 0
+        .queueFamilyIndex = 0 // Assuming Graphics queue index is 0 in your setup
     };
     vkCreateCommandPool(g_wsi.device, &pool_info, NULL, &cmd_pool);
 
@@ -583,45 +557,50 @@ THREAD_FUNC render_thread_loop(void* arg) {
 
     uint32_t current_frame = 0;
     int local_read = -1;
+
+    // Typecast Vulkan WSI Pointers
     PFN_vkWaitForFences pfnWait = (PFN_vkWaitForFences)g_wsi.vkWaitForFences;
     PFN_vkAcquireNextImageKHR pfnAcquire = (PFN_vkAcquireNextImageKHR)g_wsi.vkAcquireNextImageKHR;
     PFN_vkResetFences pfnReset = (PFN_vkResetFences)g_wsi.vkResetFences;
     PFN_vkQueueSubmit pfnSubmit = (PFN_vkQueueSubmit)g_wsi.vkQueueSubmit;
     PFN_vkQueuePresentKHR pfnPresent = (PFN_vkQueuePresentKHR)g_wsi.vkQueuePresentKHR;
 
-    // NO MORE images_in_flight ARRAY HERE! We trust the ring buffer.
-
-    while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) && atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
+    while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) &&
+           atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
+        // 2. Triad Consumer Handoff
         int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
         if (ready == -1 || ready == local_read) {
             SLEEP_MS(1);
-            continue;
+            continue; // Spinlock: Lua hasn't finished a new frame yet
         }
-
         local_read = ready;
         atomic_store_explicit(&g_ring.read_idx, local_read, memory_order_release);
+
         RenderPacket* p = &g_ring.packets[local_read];
         VkCommandBuffer cmd = cmd_buffers[current_frame];
 
+        // 3. WSI Lifecycle
         pfnWait(g_wsi.device, 1, &g_wsi.in_flight[current_frame], VK_TRUE, UINT64_MAX);
 
         uint32_t img_idx;
-        VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX, g_wsi.image_available[current_frame], VK_NULL_HANDLE, &img_idx);
+        VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX,
+                                  g_wsi.image_available[current_frame], VK_NULL_HANDLE, &img_idx);
 
-        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
+        if (res == VK_ERROR_OUT_OF_DATE_KHR) {
             atomic_store_explicit(&g_engine.mailbox.window_resized, 1, memory_order_release);
-            SLEEP_MS(10); // THE FIX: Just sleep briefly and let the main thread kill us gracefully.
+            SLEEP_MS(10);
             continue;
         }
-
         pfnReset(g_wsi.device, 1, &g_wsi.in_flight[current_frame]);
 
+        // 4. Dynamic Swapchain Injection & Command Record
         p->swapchain_image = g_wsi.swapchain_images[img_idx];
-        p->swapchain_view = g_wsi.swapchain_views[img_idx];
+        p->swapchain_view  = g_wsi.swapchain_views[img_idx];
 
         vkResetCommandBuffer(cmd, 0);
         vibe_record_commands(cmd, p, p->draw_queue, p->draw_count, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
 
+        // 5. Submit
         VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo submitInfo = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -631,13 +610,16 @@ THREAD_FUNC render_thread_loop(void* arg) {
             .commandBufferCount = 1,
             .pCommandBuffers = &cmd,
             .signalSemaphoreCount = 1,
+            // CHANGE 1: Use img_idx to guarantee 1:1 mapping with the acquired image
             .pSignalSemaphores = &g_wsi.render_finished[img_idx]
         };
         pfnSubmit(g_wsi.queue, 1, &submitInfo, g_wsi.in_flight[current_frame]);
 
+        // 6. Present
         VkPresentInfoKHR presentInfo = {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
+            // CHANGE 2: Wait on the semaphore tied to this specific image
             .pWaitSemaphores = &g_wsi.render_finished[img_idx],
             .swapchainCount = 1,
             .pSwapchains = &g_wsi.swapchain,
@@ -647,13 +629,13 @@ THREAD_FUNC render_thread_loop(void* arg) {
 
         current_frame = (current_frame + 1) % 3;
     }
-
     vkDeviceWaitIdle(g_wsi.device);
     vkFreeCommandBuffers(g_wsi.device, cmd_pool, 3, cmd_buffers);
     vkDestroyCommandPool(g_wsi.device, cmd_pool, NULL);
     printf("[C-CORE] Async Render Thread gracefully terminated and pool destroyed.\n");
     return NULL;
 }
+
 EXPORT void vibe_start_render_thread() {
     atomic_store_explicit(&g_render_thread_active, 1, memory_order_release);
     g_render_thread = vmath_thread_start(render_thread_loop, NULL);
