@@ -193,7 +193,7 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo", {
         sType = 27,
         dynamicStateCount = 6, -- Do not leave this at 2!
-        pDynamicStates = dynamicStates
+        pDynamicStates = ffi.cast("const int*", dynamicStates)
     })
 
     local pipelineRenderingInfo = ffi.new("VkPipelineRenderingCreateInfo")
