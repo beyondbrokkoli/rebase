@@ -372,12 +372,11 @@ typedef struct {
     void* vkQueuePresentKHR;
     void* pfnBegin;
     void* pfnEnd;
+    void* pfnSetCullMode;
+    void* pfnSetDepthTestEnable;
+    void* pfnSetDepthWriteEnable;
+    void* pfnSetDepthCompareOp;
 } RenderThreadInit;
-
-typedef void (VKAPI_PTR *PFN_vkCmdSetCullModeEXT)(VkCommandBuffer, uint32_t);
-typedef void (VKAPI_PTR *PFN_vkCmdSetDepthTestEnableEXT)(VkCommandBuffer, uint32_t);
-typedef void (VKAPI_PTR *PFN_vkCmdSetDepthWriteEnableEXT)(VkCommandBuffer, uint32_t);
-typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOpEXT)(VkCommandBuffer, uint32_t);
 
 typedef struct {
     alignas(64) RenderPacket packets[3];
@@ -420,11 +419,6 @@ EXPORT void vibe_ring_submit(int idx) {
 EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
-
-    PFN_vkCmdSetCullModeEXT vkCmdSetCullModeEXT = (PFN_vkCmdSetCullModeEXT)g_wsi.pfnSetCullMode;
-    PFN_vkCmdSetDepthTestEnableEXT vkCmdSetDepthTestEnableEXT = (PFN_vkCmdSetDepthTestEnableEXT)g_wsi.pfnSetDepthTestEnable;
-    PFN_vkCmdSetDepthWriteEnableEXT vkCmdSetDepthWriteEnableEXT = (PFN_vkCmdSetDepthWriteEnableEXT)g_wsi.pfnSetDepthWriteEnable;
-    PFN_vkCmdSetDepthCompareOpEXT vkCmdSetDepthCompareOpEXT = (PFN_vkCmdSetDepthCompareOpEXT)g_wsi.pfnSetDepthCompareOp;
 
     // 1. Compute Dispatch (Preserved)
     if (p->comp_pipeline != 0) {
@@ -506,6 +500,11 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     VkBuffer ibo = (VkBuffer)p->index_buffer;
     // VK_INDEX_TYPE_UINT32 because we allocated our MASTER_INDEX_BLOCK as uint32_t
     vkCmdBindIndexBuffer(cmd, ibo, 0, VK_INDEX_TYPE_UINT32);
+
+    PFN_vkCmdSetCullModeEXT vkCmdSetCullModeEXT = (PFN_vkCmdSetCullModeEXT)g_wsi.pfnSetCullMode;
+    PFN_vkCmdSetDepthTestEnableEXT vkCmdSetDepthTestEnableEXT = (PFN_vkCmdSetDepthTestEnableEXT)g_wsi.pfnSetDepthTestEnable;
+    PFN_vkCmdSetDepthWriteEnableEXT vkCmdSetDepthWriteEnableEXT = (PFN_vkCmdSetDepthWriteEnableEXT)g_wsi.pfnSetDepthWriteEnable;
+    PFN_vkCmdSetDepthCompareOpEXT vkCmdSetDepthCompareOpEXT = (PFN_vkCmdSetDepthCompareOpEXT)g_wsi.pfnSetDepthCompareOp;
 
     // 4. Data-Oriented Queue Execution
     uint64_t current_pipeline = 0;
