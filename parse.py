@@ -175,7 +175,7 @@ def generate_lua_ffi_cdef(xml_path):
         emitted_names.add(name)
 
         if "ULL" in value or "ull" in value:
-            constants_64.append(f"static const uint64_t {name} = {value};")
+            constants_64.append(f"static const unsigned long long {name} = {value};")
         else:
             ffi_declarations.append(f"    {name} = {value},")
 
@@ -185,7 +185,7 @@ def generate_lua_ffi_cdef(xml_path):
         if resolved_val is not None:
             emitted_names.add(name)
             if "ULL" in resolved_val or "ull" in resolved_val:
-                constants_64.append(f"static const uint64_t {name} = {resolved_val};")
+                constants_64.append(f"static const unsigned long long {name} = {resolved_val};")
             else:
                 ffi_declarations.append(f"    {name} = {resolved_val},")
 
