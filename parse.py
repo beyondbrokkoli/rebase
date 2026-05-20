@@ -39,6 +39,7 @@ TARGET_FUNCTIONS = {
     # Graphics/Rendering specific
     "vkCmdBeginRendering", "vkCmdDraw", "vkCmdEndRendering",
 
+
     # Swapchain & Sync
     "vkCreateSemaphore", "vkDestroySemaphore", "vkRenderingAttachementInfoKHR",
     "vkAcquireNextImageKHR", "vkCreateSwapchainKHR", "vkDestroySwapchainKHR", "vkQueuePresentKHR",
@@ -49,6 +50,7 @@ TARGET_FUNCTIONS = {
 
 TARGET_STRUCTS = {
     "VkPhysicalDeviceDynamicRenderingFeatures",
+    "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT",
     "VkImageCreateInfo",
     "VkMemoryAllocateInfo",
     "VkPipelineShaderStageCreateInfo",
