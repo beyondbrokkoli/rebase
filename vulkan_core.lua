@@ -133,7 +133,7 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     })
 
     -- Enable Swapchain, Dynamic Rendering, and the entire dependency tree!
-    local deviceExtensions = ffi.new("const char*[7]", {
+    local deviceExtensions = ffi.new("const char*[8]", {
         "VK_KHR_swapchain",
         "VK_KHR_dynamic_rendering",
         "VK_KHR_depth_stencil_resolve",
@@ -141,37 +141,43 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
         "VK_KHR_multiview",
         "VK_KHR_maintenance2",
         "VK_EXT_extended_dynamic_state", -- The missing extension
---        "VK_EXT_extended_dynamic_state2" -- Depth states live here!
+        "VK_EXT_extended_dynamic_state2" -- Depth states live here!
     })
 
-    -- Enable Dynamic Rendering Feature struct
-    local dynamicRendering = ffi.new("VkPhysicalDeviceDynamicRenderingFeatures", {
-        sType = 1000044003, -- VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES
-        dynamicRendering = 1 -- VK_TRUE
-    })
+    -- 1. Dynamic Rendering Feature
+    local dynamicRendering = ffi.new("VkPhysicalDeviceDynamicRenderingFeatures")
+    ffi.fill(dynamicRendering, ffi.sizeof(dynamicRendering))
+    dynamicRendering.sType = 1000044003
+    dynamicRendering.dynamicRendering = 1
 
-    -- The Golden Key: Chain this to dynamicRendering
-    local extDynamicState = ffi.new("VkPhysicalDeviceExtendedDynamicStateFeaturesEXT", {
-        sType = 1000267000,
-        pNext = dynamicRendering,
-        extendedDynamicState = 1
-    })
+    -- 2. Extended Dynamic State 1 Feature
+    local extDynamicState = ffi.new("VkPhysicalDeviceExtendedDynamicStateFeaturesEXT")
+    ffi.fill(extDynamicState, ffi.sizeof(extDynamicState))
+    extDynamicState.sType = 1000267000
+    extDynamicState.pNext = dynamicRendering
+    extDynamicState.extendedDynamicState = 1
 
-    -- Request Physical Device Features (like Large Points)
+    -- 3. Extended Dynamic State 2 Feature (THE FIX)
+    local extDynamicState2 = ffi.new("VkPhysicalDeviceExtendedDynamicState2FeaturesEXT")
+    ffi.fill(extDynamicState2, ffi.sizeof(extDynamicState2))
+    extDynamicState2.sType = 1000377000 -- VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
+    extDynamicState2.pNext = extDynamicState
+    extDynamicState2.extendedDynamicState2 = 1
+
     local deviceFeatures = ffi.new("VkPhysicalDeviceFeatures")
     ffi.fill(deviceFeatures, ffi.sizeof(deviceFeatures))
-    deviceFeatures.largePoints = 1 -- VK_TRUE: Allows gl_PointSize > 1.0!
+    deviceFeatures.largePoints = 1
 
-    -- Hook it into the Device Create Info
-    local deviceCreateInfo = ffi.new("VkDeviceCreateInfo", {
-        sType = 3, -- VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
-        pNext = extDynamicState,
-        queueCreateInfoCount = 1,
-        pQueueCreateInfos = queueCreateInfo,
-        enabledExtensionCount = 7,
-        ppEnabledExtensionNames = deviceExtensions,
-        pEnabledFeatures = deviceFeatures
-    })
+    -- 4. Device Creation
+    local deviceCreateInfo = ffi.new("VkDeviceCreateInfo")
+    ffi.fill(deviceCreateInfo, ffi.sizeof(deviceCreateInfo))
+    deviceCreateInfo.sType = 3
+    deviceCreateInfo.pNext = extDynamicState2 -- Pass the head of the chain!
+    deviceCreateInfo.queueCreateInfoCount = 1
+    deviceCreateInfo.pQueueCreateInfos = queueCreateInfo
+    deviceCreateInfo.enabledExtensionCount = 8
+    deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions
+    deviceCreateInfo.pEnabledFeatures = deviceFeatures
 
     local pDevice = ffi.new("VkDevice[1]")
     local res = vk.vkCreateDevice(physicalDevice, deviceCreateInfo, nil, pDevice)

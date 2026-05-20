@@ -176,36 +176,32 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     -- 7. DYNAMIC RENDERING LINK & FINAL BUILD
     local colorFormats = ffi.new("int32_t[1]", {colorFormat})
 
-    local VK_DYNAMIC_STATE_CULL_MODE_EXT = 1000267001
-    local VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT = 1000267007
-    local VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT = 1000267008
-    local VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT = 1000267009
+    -- Strict C-Array to prevent Lua table pointer shifting
+    local dynamicStates = ffi.new("VkDynamicState[6]")
+    dynamicStates[0] = 0 -- VK_DYNAMIC_STATE_VIEWPORT
+    dynamicStates[1] = 1 -- VK_DYNAMIC_STATE_SCISSOR
+    dynamicStates[2] = 1000267001 -- CULL_MODE (From EDS1)
+    dynamicStates[3] = 1000267007 -- DEPTH_TEST_ENABLE (From EDS2)
+    dynamicStates[4] = 1000267008 -- DEPTH_WRITE_ENABLE (From EDS2)
+    dynamicStates[5] = 1000267009 -- DEPTH_COMPARE_OP (From EDS2)
 
-    local dynamicStates = ffi.new("int32_t[6]", {
-        0, -- Viewport
-        1, -- Scissor
-        VK_DYNAMIC_STATE_CULL_MODE_EXT,
-        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT,
-        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT,
-        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
-    })
-
-    local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo", {
-        sType = 27,
-        dynamicStateCount = 6, -- Do not leave this at 2!
-        pDynamicStates = ffi.cast("const int*", dynamicStates)
-    })
+    -- Explicit struct instantiation with ffi.fill guarantees perfect memory layout
+    local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo")
+    ffi.fill(dynamicStateInfo, ffi.sizeof(dynamicStateInfo))
+    dynamicStateInfo.sType = 27
+    dynamicStateInfo.dynamicStateCount = 6
+    dynamicStateInfo.pDynamicStates = dynamicStates
 
     local pipelineRenderingInfo = ffi.new("VkPipelineRenderingCreateInfo")
     ffi.fill(pipelineRenderingInfo, ffi.sizeof(pipelineRenderingInfo))
-    pipelineRenderingInfo.sType = 1000044002 -- VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO
+    pipelineRenderingInfo.sType = 1000044002
     pipelineRenderingInfo.colorAttachmentCount = 1
     pipelineRenderingInfo.pColorAttachmentFormats = colorFormats
-    pipelineRenderingInfo.depthAttachmentFormat = 126 -- VK_FORMAT_D32_SFLOAT
+    pipelineRenderingInfo.depthAttachmentFormat = 126
 
     local pipelineInfo = ffi.new("VkGraphicsPipelineCreateInfo[1]")
     ffi.fill(pipelineInfo, ffi.sizeof(pipelineInfo))
-    pipelineInfo[0].sType = 28 -- STRICT FIX: 28 is VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
+    pipelineInfo[0].sType = 28
     pipelineInfo[0].pNext = pipelineRenderingInfo
     pipelineInfo[0].stageCount = 2
     pipelineInfo[0].pStages = shaderStages
