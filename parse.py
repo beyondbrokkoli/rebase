@@ -102,45 +102,32 @@ def generate_lua_ffi_cdef(xml_path):
                 # Strip out C-specific suffixes like 'U' or 'ULL' (e.g. 32U -> 32)
                 api_constants[name] = value.replace('U', '').replace('L', '')
 
-    # [THE PATCH] 0.5 Grab the actual Enum Values!
-    ffi_declarations.append("\n// --- Enum Values ---")
-    ffi_declarations.append("enum {")
+    # [THE PATCH] Unified Enum & Alias Resolution
+    raw_enums = {}
+    aliases = {}
 
-    seen_enum_names = set() # <--- THE DEFENDER SHIELD
-    constants_64 = []       # <--- THE 64-BIT INTERCEPTOR
-    known_64_bit_names = set()
-
-    # Find all enum groups that are actual enums (not bitmasks)
+    # 1. Base Enums
     for enums_node in root.findall('.//enums[@type="enum"]'):
         for enum_tag in enums_node.findall('enum'):
             name = enum_tag.get('name')
             value = enum_tag.get('value')
+            alias = enum_tag.get('alias')
 
-            if not value:
-                value = enum_tag.get('alias')
+            if name:
+                if value is not None and not value.startswith('"'):
+                    raw_enums[name] = value
+                elif alias is not None:
+                    aliases[name] = alias
 
-            if name and value and name not in seen_enum_names:
-                # If the raw XML value explicitly contains 'ULL', route it!
-                if "ULL" in value or "ull" in value:
-                    constants_64.append(f"static const uint64_t {name} = {value};")
-                    known_64_bit_names.add(name)
-                elif value in known_64_bit_names:
-                    constants_64.append(f"static const uint64_t {name} = {value};")
-                    known_64_bit_names.add(name)
-                else:
-                    ffi_declarations.append(f"    {name} = {value},")
-                seen_enum_names.add(name)
-
-    # [THE PATCH PART 2] Extract Promoted Core and Extension Enums
+    # 2. Promoted Core and Extension Enums
     for container in root.findall('.//feature') + root.findall('.//extensions/extension'):
         container_ext_number = container.get('number')
-
         for req in container.findall('require'):
             for enum_tag in req.findall('enum'):
                 name = enum_tag.get('name')
                 extends = enum_tag.get('extends')
 
-                if not name or not extends or name in seen_enum_names:
+                if not name or not extends:
                     continue
 
                 offset_str = enum_tag.get('offset')
@@ -148,51 +135,62 @@ def generate_lua_ffi_cdef(xml_path):
                 value_str = enum_tag.get('value')
                 alias_str = enum_tag.get('alias')
 
-                # 1. Math-based offset
                 if offset_str is not None:
                     ext_num_str = enum_tag.get('extnumber') or container_ext_number
                     if ext_num_str:
                         ext_number = int(ext_num_str)
                         offset = int(offset_str)
                         direction = -1 if enum_tag.get('dir') == '-' else 1
-
                         val = direction * (1000000000 + (ext_number - 1) * 1000 + offset)
-                        ffi_declarations.append(f"    {name} = {val},")
-                        seen_enum_names.add(name)
+                        raw_enums[name] = str(val)
 
-                # 2. Bitmask position
                 elif bitpos_str is not None:
                     val = 1 << int(bitpos_str)
-                    if int(bitpos_str) >= 31: # <--- INTERCEPT 64-BIT FLAGS
-                        constants_64.append(f"static const uint64_t {name} = {hex(val)}ULL;")
-                        known_64_bit_names.add(name)
+                    if int(bitpos_str) >= 31:
+                        raw_enums[name] = f"{hex(val)}ULL"
                     else:
-                        ffi_declarations.append(f"    {name} = {hex(val)},") # Hex is safer for 32-bit bounds
-                    seen_enum_names.add(name)
+                        raw_enums[name] = hex(val)
 
-                # 3. Hardcoded direct value
-                elif value_str is not None:
-                    if not value_str.startswith('"'):
-                        if "ULL" in value_str or "ull" in value_str:
-                            constants_64.append(f"static const uint64_t {name} = {value_str};")
-                            known_64_bit_names.add(name)
-                        else:
-                            ffi_declarations.append(f"    {name} = {value_str},")
-                        seen_enum_names.add(name)
+                elif value_str is not None and not value_str.startswith('"'):
+                    raw_enums[name] = value_str
 
-                # 4. Alias
                 elif alias_str is not None:
-                    # If this is aliasing a 64-bit value, the alias must also be a 64-bit constant
-                    if alias_str in known_64_bit_names:
-                        constants_64.append(f"static const uint64_t {name} = {alias_str};")
-                        known_64_bit_names.add(name)
-                    else:
-                        ffi_declarations.append(f"    {name} = {alias_str},")
-                    seen_enum_names.add(name)
+                    aliases[name] = alias_str
+
+    # 3. Resolve Aliases to Raw Values (Recursively)
+    def resolve_alias(alias_name, depth=0):
+        if depth > 10: return None # Prevent infinite loops
+        if alias_name in raw_enums: return raw_enums[alias_name]
+        if alias_name in aliases: return resolve_alias(aliases[alias_name], depth + 1)
+        return None
+
+    # 4. Emit to C Block
+    ffi_declarations.append("\n// --- Enum Values ---")
+    ffi_declarations.append("enum {")
+    constants_64 = []
+    emitted_names = set()
+
+    for name, value in raw_enums.items():
+        if name in emitted_names: continue
+        emitted_names.add(name)
+
+        if "ULL" in value or "ull" in value:
+            constants_64.append(f"static const uint64_t {name} = {value};")
+        else:
+            ffi_declarations.append(f"    {name} = {value},")
+
+    for name, target in aliases.items():
+        if name in emitted_names: continue
+        resolved_val = resolve_alias(target)
+        if resolved_val is not None:
+            emitted_names.add(name)
+            if "ULL" in resolved_val or "ull" in resolved_val:
+                constants_64.append(f"static const uint64_t {name} = {resolved_val};")
+            else:
+                ffi_declarations.append(f"    {name} = {resolved_val},")
 
     ffi_declarations.append("};")
 
-    # [THE PATCH PART 3] Emit 64-Bit Constants Safely
     if constants_64:
         ffi_declarations.append("\n// --- 64-Bit Constants (Routed out of enum block) ---")
         ffi_declarations.extend(constants_64)
