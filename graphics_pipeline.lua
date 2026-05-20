@@ -180,10 +180,10 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local dynamicStates = ffi.new("VkDynamicState[6]")
     dynamicStates[0] = 0 -- VK_DYNAMIC_STATE_VIEWPORT
     dynamicStates[1] = 1 -- VK_DYNAMIC_STATE_SCISSOR
-    dynamicStates[2] = 1000267001 -- CULL_MODE (From EDS1)
-    dynamicStates[3] = 1000267007 -- DEPTH_TEST_ENABLE (From EDS2)
-    dynamicStates[4] = 1000267008 -- DEPTH_WRITE_ENABLE (From EDS2)
-    dynamicStates[5] = 1000267009 -- DEPTH_COMPARE_OP (From EDS2)
+    dynamicStates[2] = 1000267000 -- CULL_MODE (From EDS1)
+    dynamicStates[3] = 1000267006 -- DEPTH_TEST_ENABLE (From EDS2)
+    dynamicStates[4] = 1000267007 -- DEPTH_WRITE_ENABLE (From EDS2)
+    dynamicStates[5] = 1000267008 -- DEPTH_COMPARE_OP (From EDS2)
 
     -- Explicit struct instantiation with ffi.fill guarantees perfect memory layout
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo")
