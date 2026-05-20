@@ -122,27 +122,47 @@ def generate_lua_ffi_cdef(xml_path):
                 ffi_declarations.append(f"    {name} = {value},")
                 seen_enum_names.add(name)
 
-    # [THE PATCH PART 2] Extract Extension Enum Values dynamically
-    for ext in root.findall('.//extensions/extension'):
-        ext_number = int(ext.get('number', 0))
-        if ext_number == 0:
-            continue
+    # [THE PATCH PART 2] Extract Promoted Core and Extension Enums
+    # We must scan both <feature> (Core) and <extension> (Add-ons) because
+    # Khronos moves extensions to features when they are promoted to Core.
 
-        for req in ext.findall('require'):
+    for container in root.findall('.//feature') + root.findall('.//extensions/extension'):
+        # Fallback extension number if the container is an <extension>
+        container_ext_number = container.get('number')
+
+        for req in container.findall('require'):
             for enum_tag in req.findall('enum'):
-                if enum_tag.get('extends') and enum_tag.get('offset'):
-                    name = enum_tag.get('name')
-                    offset = int(enum_tag.get('offset'))
-                    # Handle negative offsets (dir="-")
-                    direction = -1 if enum_tag.get('dir') == '-' else 1
+                name = enum_tag.get('name')
+                extends = enum_tag.get('extends')
 
-                    # Vulkan Extension Formula
-                    val = direction * (1000000000 + (ext_number - 1) * 1000 + offset)
+                # We only care about enums extending existing types, and we must not duplicate
+                if not name or not extends or name in seen_enum_names:
+                    continue
 
-                    # Defend against duplicates here as well!
-                    if name and name not in seen_enum_names:
+                # 1. Is it a math-based offset?
+                offset_str = enum_tag.get('offset')
+                if offset_str is not None:
+                    # Promoted core enums put 'extnumber' directly on the enum tag!
+                    ext_num_str = enum_tag.get('extnumber') or container_ext_number
+                    if ext_num_str:
+                        ext_number = int(ext_num_str)
+                        offset = int(offset_str)
+                        direction = -1 if enum_tag.get('dir') == '-' else 1
+
+                        # The Sacred Vulkan Enum Formula
+                        val = direction * (1000000000 + (ext_number - 1) * 1000 + offset)
+
                         ffi_declarations.append(f"    {name} = {val},")
                         seen_enum_names.add(name)
+
+                # 2. Is it an alias to an already-defined enum?
+                alias = enum_tag.get('alias')
+                if alias:
+                    # Because we search <feature> before <extension>, the core
+                    # value (e.g. CULL_MODE) is guaranteed to be declared before
+                    # the alias (CULL_MODE_EXT), keeping the C enum block valid.
+                    ffi_declarations.append(f"    {name} = {alias},")
+                    seen_enum_names.add(name)
 
     ffi_declarations.append("};")
     # 1. Grab Handles
