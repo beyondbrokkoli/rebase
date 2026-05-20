@@ -296,32 +296,28 @@ typedef struct {
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
-/* ===== DRAW COMMAND - Explicit packing for ABI safety ===== */
-typedef struct __attribute__((packed, aligned(8))) {
-    uint64_t pipeline_id;           /* 0   */
-    uint64_t descriptor_set;        /* 8   */
-    uint32_t index_count;           /* 16  */
-    uint32_t instance_count;        /* 20  */
-    uint32_t first_index;           /* 24  */
-    int32_t  vertex_offset;         /* 28  */
-    uint32_t first_instance;        /* 32  */
-    uint32_t _pad_cmd;              /* 36  */
-    uint8_t  push_constants[128];   /* 40  */
-    int16_t  scissor_x;             /* 168 */
-    int16_t  scissor_y;             /* 170 */
-    uint16_t scissor_w;             /* 172 */
-    uint16_t scissor_h;             /* 174 */
-    uint8_t  cull_mode;             /* 176 */
-    uint8_t  front_face;            /* 177 */
-    uint8_t  depth_test;            /* 178 */
-    uint8_t  depth_write;           /* 179 */
-    uint8_t  depth_compare;         /* 180 */
-    uint8_t  topology;              /* 181 */
-    uint8_t  _pad0[2];              /* 182 - CRITICAL: ensures uint32_t alignment */
-    uint32_t viewport_scale_id;     /* 184 - Now guaranteed aligned even with packed */
-    uint8_t  _padding[4];           /* 188 */
+typedef struct {
+    uint64_t pipeline_id;
+    uint64_t descriptor_set;
+    uint32_t index_count;
+    uint32_t instance_count;
+    uint32_t first_index;
+    int32_t  vertex_offset;
+    uint32_t first_instance;
+    uint32_t _pad_cmd;
+    uint8_t  push_constants[128];
+    int16_t  scissor_x;
+    int16_t  scissor_y;
+    uint16_t scissor_w;
+    uint16_t scissor_h;
+    uint8_t  cull_mode;
+    uint8_t  depth_test;
+    uint8_t  depth_write;
+    uint8_t  depth_compare;
+    uint32_t viewport_scale_id;
+    uint8_t  _padding[8];
 } DrawCommand;
-_Static_assert(sizeof(DrawCommand) == 192, "DrawCommand size mismatch");
+_Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
 
 /* ===== RENDER PACKET - MUST match packed+aligned(64) in BOTH languages ===== */
 typedef struct __attribute__((packed, aligned(64))) {
@@ -363,20 +359,16 @@ typedef struct {
     void* pfnBegin;
     void* pfnEnd;
     void* pfnSetCullMode;
-    void* pfnSetFrontFace;
     void* pfnSetDepthTestEnable;
     void* pfnSetDepthWriteEnable;
     void* pfnSetDepthCompareOp;
-    void* pfnSetPrimitiveTopology;
 } RenderThreadInit;
 
 // Vulkan Extended Dynamic State PFNs
 typedef void (VKAPI_PTR *PFN_vkCmdSetCullMode)(VkCommandBuffer, VkCullModeFlags);
-typedef void (VKAPI_PTR *PFN_vkCmdSetFrontFace)(VkCommandBuffer, VkFrontFace);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthTestEnable)(VkCommandBuffer, VkBool32);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthWriteEnable)(VkCommandBuffer, VkBool32);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOp)(VkCommandBuffer, VkCompareOp);
-typedef void (VKAPI_PTR *PFN_vkCmdSetPrimitiveTopology)(VkCommandBuffer, VkPrimitiveTopology);
 
 typedef struct {
     alignas(64) RenderPacket packets[3];
@@ -415,7 +407,6 @@ EXPORT int vibe_ring_get_write_idx() {
 EXPORT void vibe_ring_submit(int idx) {
     atomic_store_explicit(&g_ring.ready_idx, idx, memory_order_release);
 }
-
 EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
@@ -475,7 +466,6 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         .clearValue.depthStencil = {0.0f, 0}
     };
 
-    // Begin Rendering
     VkRenderingInfoKHR renderInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
         .renderArea.extent = {p->width, p->height},
@@ -486,23 +476,17 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     };
     pfnBegin(cmd, &renderInfo);
 
-    // Initial Buffer Binds
     VkDeviceSize offset = 0;
     VkBuffer vbo = (VkBuffer)p->vertex_buffer;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
     VkBuffer ibo = (VkBuffer)p->index_buffer;
     vkCmdBindIndexBuffer(cmd, ibo, 0, VK_INDEX_TYPE_UINT32);
 
-    // Fetch dynamic PFNs
     PFN_vkCmdSetCullMode        pfnCull       = (PFN_vkCmdSetCullMode)g_wsi.pfnSetCullMode;
-    PFN_vkCmdSetFrontFace       pfnFront      = (PFN_vkCmdSetFrontFace)g_wsi.pfnSetFrontFace;
     PFN_vkCmdSetDepthTestEnable pfnDepthTest  = (PFN_vkCmdSetDepthTestEnable)g_wsi.pfnSetDepthTestEnable;
     PFN_vkCmdSetDepthWriteEnable pfnDepthWrite = (PFN_vkCmdSetDepthWriteEnable)g_wsi.pfnSetDepthWriteEnable;
     PFN_vkCmdSetDepthCompareOp  pfnDepthComp  = (PFN_vkCmdSetDepthCompareOp)g_wsi.pfnSetDepthCompareOp;
-    PFN_vkCmdSetPrimitiveTopology pfnTopo     = (PFN_vkCmdSetPrimitiveTopology)g_wsi.pfnSetPrimitiveTopology;
 
-    // === SHADOW STATE INITIALIZATION ===
-    // Initialized to invalid values to force an update on the first command.
     uint64_t current_pipeline = ~0ULL;
     uint64_t current_descriptor = ~0ULL;
     VkRect2D current_scissor = { {-1, -1}, {0, 0} };
@@ -511,8 +495,6 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     uint8_t  current_dtest = 0xFF;
     uint8_t  current_dwrite = 0xFF;
     uint8_t  current_dcomp = 0xFF;
-    uint8_t current_front = 0xFF;
-    uint8_t current_topo = 0xFF;
 
     for (uint32_t i = 0; i < count; i++) {
         DrawCommand* draw = &queue[i];
@@ -520,14 +502,6 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         if (draw->pipeline_id != current_pipeline) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)draw->pipeline_id);
             current_pipeline = draw->pipeline_id;
-
-            // RESET TRACKERS ON PIPELINE CHANGE
-            current_cull = 0xFF;
-            current_front = 0xFF;
-            current_dtest = 0xFF;
-            current_dwrite = 0xFF;
-            current_dcomp = 0xFF;
-            current_topo = 0xFF;
         }
 
         if (draw->descriptor_set != current_descriptor) {
@@ -536,7 +510,6 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             current_descriptor = draw->descriptor_set;
         }
 
-        // === EVALUATE DYNAMIC STATE DELTAS ===
         if (draw->scissor_x != current_scissor.offset.x || draw->scissor_y != current_scissor.offset.y ||
             draw->scissor_w != current_scissor.extent.width || draw->scissor_h != current_scissor.extent.height) {
             current_scissor.offset.x = draw->scissor_x;
@@ -547,7 +520,6 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         }
 
         if (draw->viewport_scale_id != current_viewport_id) {
-            // Placeholder: Assume ID 0 = full screen. Expand this logic later for split-screen / UI scaling.
             VkViewport vp = {0.0f, 0.0f, (float)p->width, (float)p->height, 0.0f, 1.0f};
             vkCmdSetViewport(cmd, 0, 1, &vp);
             current_viewport_id = draw->viewport_scale_id;
@@ -557,29 +529,19 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             pfnCull(cmd, (VkCullModeFlags)draw->cull_mode);
             current_cull = draw->cull_mode;
         }
-        if (pfnFront && draw->front_face != current_front) {
-            pfnFront(cmd, (VkFrontFace)draw->front_face);
-            current_front = draw->front_face;
-        }
         if (pfnDepthTest && draw->depth_test != current_dtest) {
             pfnDepthTest(cmd, (VkBool32)draw->depth_test);
             current_dtest = draw->depth_test;
         }
-
         if (pfnDepthWrite && draw->depth_write != current_dwrite) {
             pfnDepthWrite(cmd, (VkBool32)draw->depth_write);
             current_dwrite = draw->depth_write;
         }
-
         if (pfnDepthComp && draw->depth_compare != current_dcomp) {
             pfnDepthComp(cmd, (VkCompareOp)draw->depth_compare);
             current_dcomp = draw->depth_compare;
         }
-        if (pfnTopo && draw->topology != current_topo) {
-            pfnTopo(cmd, (VkPrimitiveTopology)draw->topology);
-            current_topo = draw->topology;
-        }
-        // Execute Draw
+
         vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
         vkCmdDrawIndexed(cmd, draw->index_count, draw->instance_count, draw->first_index, draw->vertex_offset, draw->first_instance);
     }
@@ -621,52 +583,36 @@ THREAD_FUNC render_thread_loop(void* arg) {
 
     uint32_t current_frame = 0;
     int local_read = -1;
-
     PFN_vkWaitForFences pfnWait = (PFN_vkWaitForFences)g_wsi.vkWaitForFences;
     PFN_vkAcquireNextImageKHR pfnAcquire = (PFN_vkAcquireNextImageKHR)g_wsi.vkAcquireNextImageKHR;
     PFN_vkResetFences pfnReset = (PFN_vkResetFences)g_wsi.vkResetFences;
     PFN_vkQueueSubmit pfnSubmit = (PFN_vkQueueSubmit)g_wsi.vkQueueSubmit;
     PFN_vkQueuePresentKHR pfnPresent = (PFN_vkQueuePresentKHR)g_wsi.vkQueuePresentKHR;
 
-    // FIX 1: Track which fence is protecting which physical swapchain image
-    VkFence images_in_flight[10];
-    for (int i = 0; i < 10; i++) {
-        images_in_flight[i] = VK_NULL_HANDLE;
-    }
+    // NO MORE images_in_flight ARRAY HERE! We trust the ring buffer.
 
-    while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) && 
-           atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
-
+    while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) && atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
         int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
-        if (ready == -1 || ready == local_read) { SLEEP_MS(1); continue; }
+        if (ready == -1 || ready == local_read) {
+            SLEEP_MS(1);
+            continue;
+        }
+
         local_read = ready;
         atomic_store_explicit(&g_ring.read_idx, local_read, memory_order_release);
         RenderPacket* p = &g_ring.packets[local_read];
-
         VkCommandBuffer cmd = cmd_buffers[current_frame];
 
-        // 1. Wait for the CPU frame timeline
         pfnWait(g_wsi.device, 1, &g_wsi.in_flight[current_frame], VK_TRUE, UINT64_MAX);
 
         uint32_t img_idx;
         VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX, g_wsi.image_available[current_frame], VK_NULL_HANDLE, &img_idx);
 
-        // FIX 2: Do NOT 'continue' on out-of-date. It will reuse the semaphore and trigger Error 1.
-        // Instead, suspend the loop and wait for Lua to gracefully kill this thread.
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             atomic_store_explicit(&g_engine.mailbox.window_resized, 1, memory_order_release);
-            while(atomic_load_explicit(&g_render_thread_active, memory_order_acquire)) {
-                SLEEP_MS(10);
-            }
-            break; 
+            SLEEP_MS(10); // THE FIX: Just sleep briefly and let the main thread kill us gracefully.
+            continue;
         }
-
-        // FIX 3: If the compositor gave us an image that is STILL being processed by an older frame, wait for it!
-        if (images_in_flight[img_idx] != VK_NULL_HANDLE) {
-            pfnWait(g_wsi.device, 1, &images_in_flight[img_idx], VK_TRUE, UINT64_MAX);
-        }
-        // Map this image to the current frame's fence
-        images_in_flight[img_idx] = g_wsi.in_flight[current_frame];
 
         pfnReset(g_wsi.device, 1, &g_wsi.in_flight[current_frame]);
 
@@ -685,14 +631,14 @@ THREAD_FUNC render_thread_loop(void* arg) {
             .commandBufferCount = 1,
             .pCommandBuffers = &cmd,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &g_wsi.render_finished[img_idx] // Restored to physical image index!
+            .pSignalSemaphores = &g_wsi.render_finished[img_idx]
         };
         pfnSubmit(g_wsi.queue, 1, &submitInfo, g_wsi.in_flight[current_frame]);
 
         VkPresentInfoKHR presentInfo = {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &g_wsi.render_finished[img_idx], // Restored to physical image index!
+            .pWaitSemaphores = &g_wsi.render_finished[img_idx],
             .swapchainCount = 1,
             .pSwapchains = &g_wsi.swapchain,
             .pImageIndices = &img_idx

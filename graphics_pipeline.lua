@@ -13,77 +13,13 @@ local function ReadShaderFile(filename)
 end
 
 function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, colorFormat)
-    print("[GRAPHICS] Building Reverse-Z Depth Buffer and Shader Modules (Dynamic State Enabled)...")
+    print("[GRAPHICS] Building Reverse-Z Pipeline (Ultra-Stable Dynamic State)...")
     local device = core_state.device
     local physDevice = core_state.physicalDevice
 
-    -- 1. Create Depth Image (The Z-Buffer)
-    local dImgInfo = ffi.new("VkImageCreateInfo")
-    ffi.fill(dImgInfo, ffi.sizeof(dImgInfo))
-    dImgInfo.sType = 14 -- VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-    dImgInfo.imageType = 1 -- VK_IMAGE_TYPE_2D
-    dImgInfo.extent.width = width
-    dImgInfo.extent.height = height
-    dImgInfo.extent.depth = 1
-    dImgInfo.mipLevels = 1
-    dImgInfo.arrayLayers = 1
-    dImgInfo.format = 126 -- VK_FORMAT_D32_SFLOAT
-    dImgInfo.tiling = 0 -- VK_IMAGE_TILING_OPTIMAL
-    dImgInfo.initialLayout = 0 -- VK_IMAGE_LAYOUT_UNDEFINED
-    dImgInfo.usage = 32 -- VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-    dImgInfo.samples = 1 -- VK_SAMPLE_COUNT_1_BIT
+    -- [Depth Buffer Allocation - Same as your stable baseline]
+    local dImgInfo = ffi.new("VkImageCreateInfo"); ffi.fill(dImgInfo, ffi.sizeof(dImgInfo)); dImgInfo.sType = 14; dImgInfo.imageType = 1; dImgInfo.extent.width = width; dImgInfo.extent.height = height; dImgInfo.extent.depth = 1; dImgInfo.mipLevels = 1; dImgInfo.arrayLayers = 1; dImgInfo.format = 126; dImgInfo.tiling = 0; dImgInfo.initialLayout = 0; dImgInfo.usage = 32; dImgInfo.samples = 1; local pDepthImage = ffi.new("VkImage[1]"); assert(vk.vkCreateImage(device, dImgInfo, nil, pDepthImage) == 0); local depthImage = pDepthImage[0]; local memReqs = ffi.new("VkMemoryRequirements"); vk.vkGetImageMemoryRequirements(device, depthImage, memReqs); local memProperties = ffi.new("VkPhysicalDeviceMemoryProperties"); vk.vkGetPhysicalDeviceMemoryProperties(physDevice, memProperties); local memoryTypeIndex = -1; for i = 0, memProperties.memoryTypeCount - 1 do; local isTypeSupported = bit.band(memReqs.memoryTypeBits, bit.lshift(1, i)) ~= 0; local isVRAM = bit.band(memProperties.memoryTypes[i].propertyFlags, 1) ~= 0; if isTypeSupported and isVRAM then; memoryTypeIndex = i; break; end; end; assert(memoryTypeIndex ~= -1, "FATAL: Could not find VRAM for Depth Buffer!"); local dAllocInfo = ffi.new("VkMemoryAllocateInfo"); ffi.fill(dAllocInfo, ffi.sizeof(dAllocInfo)); dAllocInfo.sType = 5; dAllocInfo.allocationSize = memReqs.size; dAllocInfo.memoryTypeIndex = memoryTypeIndex; local pDepthMemory = ffi.new("VkDeviceMemory[1]"); assert(vk.vkAllocateMemory(device, dAllocInfo, nil, pDepthMemory) == 0); local depthMemory = pDepthMemory[0]; assert(vk.vkBindImageMemory(device, depthImage, depthMemory, 0) == 0); local dViewInfo = ffi.new("VkImageViewCreateInfo"); ffi.fill(dViewInfo, ffi.sizeof(dViewInfo)); dViewInfo.sType = 15; dViewInfo.image = depthImage; dViewInfo.viewType = 1; dViewInfo.format = 126; dViewInfo.subresourceRange.aspectMask = 2; dViewInfo.subresourceRange.levelCount = 1; dViewInfo.subresourceRange.layerCount = 1; local pDepthView = ffi.new("VkImageView[1]"); assert(vk.vkCreateImageView(device, dViewInfo, nil, pDepthView) == 0); local depthImageView = pDepthView[0]
 
-    local pDepthImage = ffi.new("VkImage[1]")
-    assert(vk.vkCreateImage(device, dImgInfo, nil, pDepthImage) == 0)
-    local depthImage = pDepthImage[0]
-
-    -- 2. Allocate VRAM for the Depth Image
-    local memReqs = ffi.new("VkMemoryRequirements")
-    vk.vkGetImageMemoryRequirements(device, depthImage, memReqs)
-
-    local memProperties = ffi.new("VkPhysicalDeviceMemoryProperties")
-    vk.vkGetPhysicalDeviceMemoryProperties(physDevice, memProperties)
-
-    -- Find VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT (1)
-    local memoryTypeIndex = -1
-    for i = 0, memProperties.memoryTypeCount - 1 do
-        local isTypeSupported = bit.band(memReqs.memoryTypeBits, bit.lshift(1, i)) ~= 0
-        local isVRAM = bit.band(memProperties.memoryTypes[i].propertyFlags, 1) ~= 0
-        if isTypeSupported and isVRAM then
-            memoryTypeIndex = i
-            break
-        end
-    end
-    assert(memoryTypeIndex ~= -1, "FATAL: Could not find VRAM for Depth Buffer!")
-
-    local dAllocInfo = ffi.new("VkMemoryAllocateInfo")
-    ffi.fill(dAllocInfo, ffi.sizeof(dAllocInfo))
-    dAllocInfo.sType = 5 -- VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
-    dAllocInfo.allocationSize = memReqs.size
-    dAllocInfo.memoryTypeIndex = memoryTypeIndex
-
-    local pDepthMemory = ffi.new("VkDeviceMemory[1]")
-    assert(vk.vkAllocateMemory(device, dAllocInfo, nil, pDepthMemory) == 0)
-    local depthMemory = pDepthMemory[0]
-
-    assert(vk.vkBindImageMemory(device, depthImage, depthMemory, 0) == 0)
-
-    -- 3. Create the Depth Image View
-    local dViewInfo = ffi.new("VkImageViewCreateInfo")
-    ffi.fill(dViewInfo, ffi.sizeof(dViewInfo))
-    dViewInfo.sType = 15 -- VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
-    dViewInfo.image = depthImage
-    dViewInfo.viewType = 1 -- VK_IMAGE_VIEW_TYPE_2D
-    dViewInfo.format = 126 -- VK_FORMAT_D32_SFLOAT
-    dViewInfo.subresourceRange.aspectMask = 2 -- VK_IMAGE_ASPECT_DEPTH_BIT
-    dViewInfo.subresourceRange.levelCount = 1
-    dViewInfo.subresourceRange.layerCount = 1
-
-    local pDepthView = ffi.new("VkImageView[1]")
-    assert(vk.vkCreateImageView(device, dViewInfo, nil, pDepthView) == 0)
-    local depthImageView = pDepthView[0]
-
-    -- 4. Load Shader Modules
     local vertCode = ReadShaderFile("render_vert.spv")
     local fragCode = ReadShaderFile("render_frag.spv")
     local vertInfo = ffi.new("VkShaderModuleCreateInfo", { sType = 16, codeSize = string.len(vertCode), pCode = ffi.cast("const uint32_t*", vertCode) })
@@ -97,91 +33,37 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     shaderStages[0].sType = 18; shaderStages[0].stage = 1; shaderStages[0].module = pVertModule[0]; shaderStages[0].pName = "main"
     shaderStages[1].sType = 18; shaderStages[1].stage = 16; shaderStages[1].module = pFragModule[0]; shaderStages[1].pName = "main"
 
-    -- 1. Vertex Input & Assembly
-    local vertexInputInfo = ffi.new("VkPipelineVertexInputStateCreateInfo")
-    ffi.fill(vertexInputInfo, ffi.sizeof(vertexInputInfo))
-    vertexInputInfo.sType = 19
+    local vertexInputInfo = ffi.new("VkPipelineVertexInputStateCreateInfo"); ffi.fill(vertexInputInfo, ffi.sizeof(vertexInputInfo)); vertexInputInfo.sType = 19
+    local inputAssembly = ffi.new("VkPipelineInputAssemblyStateCreateInfo"); ffi.fill(inputAssembly, ffi.sizeof(inputAssembly)); inputAssembly.sType = 20; inputAssembly.topology = 3
+    local viewportState = ffi.new("VkPipelineViewportStateCreateInfo"); ffi.fill(viewportState, ffi.sizeof(viewportState)); viewportState.sType = 22; viewportState.viewportCount = 1; viewportState.scissorCount = 1
+    local rasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo"); ffi.fill(rasterizer, ffi.sizeof(rasterizer)); rasterizer.sType = 23; rasterizer.polygonMode = 0; rasterizer.lineWidth = 1.0
+    local depthStencil = ffi.new("VkPipelineDepthStencilStateCreateInfo"); ffi.fill(depthStencil, ffi.sizeof(depthStencil)); depthStencil.sType = 25
+    local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo"); ffi.fill(multisampling, ffi.sizeof(multisampling)); multisampling.sType = 24; multisampling.rasterizationSamples = 1
+    local colorBlendAttachment = ffi.new("VkPipelineColorBlendAttachmentState[1]"); ffi.fill(colorBlendAttachment, ffi.sizeof(colorBlendAttachment)); colorBlendAttachment[0].colorWriteMask = 15; colorBlendAttachment[0].blendEnable = 0
+    local colorBlending = ffi.new("VkPipelineColorBlendStateCreateInfo"); ffi.fill(colorBlending, ffi.sizeof(colorBlending)); colorBlending.sType = 26; colorBlending.attachmentCount = 1; colorBlending.pAttachments = colorBlendAttachment
 
-    local inputAssembly = ffi.new("VkPipelineInputAssemblyStateCreateInfo")
-    ffi.fill(inputAssembly, ffi.sizeof(inputAssembly))
-    inputAssembly.sType = 20
-    inputAssembly.topology = 3 -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST (Static baseline)
-
-    -- 2. Viewport & Scissor (Placeholder, driven by dynamic state)
-    local viewportState = ffi.new("VkPipelineViewportStateCreateInfo")
-    ffi.fill(viewportState, ffi.sizeof(viewportState))
-    viewportState.sType = 22
-    viewportState.viewportCount = 1
-    viewportState.scissorCount = 1
-
-    -- 3. Rasterizer (Valid static defaults, will be overridden dynamically)
-    local rasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo")
-    ffi.fill(rasterizer, ffi.sizeof(rasterizer))
-    rasterizer.sType = 23
-    rasterizer.polygonMode = 0 -- VK_POLYGON_MODE_FILL
-    rasterizer.lineWidth = 1.0
-    rasterizer.cullMode = 2    -- VK_CULL_MODE_BACK_BIT 
-    rasterizer.frontFace = 1   -- VK_FRONT_FACE_COUNTER_CLOCKWISE
-
-    -- 4. Depth Stencil (Valid static defaults, will be overridden dynamically)
-    local depthStencil = ffi.new("VkPipelineDepthStencilStateCreateInfo")
-    ffi.fill(depthStencil, ffi.sizeof(depthStencil))
-    depthStencil.sType = 25
-    depthStencil.depthTestEnable = 1
-    depthStencil.depthWriteEnable = 1
-    depthStencil.depthCompareOp = 1 -- VK_COMPARE_OP_LESS
-
-    -- 5. Multisample & Color Blend
-    local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo")
-    ffi.fill(multisampling, ffi.sizeof(multisampling))
-    multisampling.sType = 24
-    multisampling.rasterizationSamples = 1
-
-    local colorBlendAttachment = ffi.new("VkPipelineColorBlendAttachmentState[1]")
-    ffi.fill(colorBlendAttachment, ffi.sizeof(colorBlendAttachment))
-    colorBlendAttachment[0].colorWriteMask = 15
-    colorBlendAttachment[0].blendEnable = 0
-
-    local colorBlending = ffi.new("VkPipelineColorBlendStateCreateInfo")
-    ffi.fill(colorBlending, ffi.sizeof(colorBlending))
-    colorBlending.sType = 26
-    colorBlending.attachmentCount = 1
-    colorBlending.pAttachments = colorBlendAttachment
-
-    -- 6. THE EXHAUSTIVE DYNAMIC STATE REGISTRY (The REAL Integers)
-    local dynamicStates = ffi.new("int32_t[8]", {
+    -- === THE SANITIZED ENUMS ===
+    local dynamicStates = ffi.new("int32_t[6]", {
         0,          -- VK_DYNAMIC_STATE_VIEWPORT
         1,          -- VK_DYNAMIC_STATE_SCISSOR
-        1000267000, -- VK_DYNAMIC_STATE_CULL_MODE_EXT           (Was 001)
-        1000267001, -- VK_DYNAMIC_STATE_FRONT_FACE_EXT          (Was 002)
-        1000267002, -- VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT  (Was 003)
-        1000267006, -- VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT   (Was 007)
-        1000267007, -- VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT  (Was 008)
-        1000267008  -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT    (Was 009)
+        1000267001, -- VK_DYNAMIC_STATE_CULL_MODE_EXT
+        1000267007, -- VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT
+        1000267008, -- VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT
+        1000267009  -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
     })
 
-    local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo")
-    ffi.fill(dynamicStateInfo, ffi.sizeof(dynamicStateInfo))
-    dynamicStateInfo.sType = 27
-    dynamicStateInfo.dynamicStateCount = 8
-    dynamicStateInfo.pDynamicStates = dynamicStates
+    local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo", {
+        sType = 27,
+        dynamicStateCount = 6,
+        pDynamicStates = dynamicStates
+    })
 
-    -- 7. Pipeline Rendering Info (Vulkan 1.3 Dynamic Rendering)
     local colorFormats = ffi.new("int32_t[1]", {colorFormat})
-    local pipelineRenderingInfo = ffi.new("VkPipelineRenderingCreateInfo")
-    ffi.fill(pipelineRenderingInfo, ffi.sizeof(pipelineRenderingInfo))
-    pipelineRenderingInfo.sType = 1000044002
-    pipelineRenderingInfo.colorAttachmentCount = 1
-    pipelineRenderingInfo.pColorAttachmentFormats = colorFormats
-    pipelineRenderingInfo.depthAttachmentFormat = 126
+    local pipelineRenderingInfo = ffi.new("VkPipelineRenderingCreateInfo"); ffi.fill(pipelineRenderingInfo, ffi.sizeof(pipelineRenderingInfo)); pipelineRenderingInfo.sType = 1000044002; pipelineRenderingInfo.colorAttachmentCount = 1; pipelineRenderingInfo.pColorAttachmentFormats = colorFormats; pipelineRenderingInfo.depthAttachmentFormat = 126
 
-    -- 8. Final Assembly
-    local pipelineInfo = ffi.new("VkGraphicsPipelineCreateInfo[1]")
-    ffi.fill(pipelineInfo, ffi.sizeof(pipelineInfo))
-    pipelineInfo[0].sType = 28
-    pipelineInfo[0].pNext = pipelineRenderingInfo
-    pipelineInfo[0].stageCount = 2
-    pipelineInfo[0].pStages = shaderStages
+    local pipelineInfo = ffi.new("VkGraphicsPipelineCreateInfo[1]"); ffi.fill(pipelineInfo, ffi.sizeof(pipelineInfo))
+    pipelineInfo[0].sType = 28; pipelineInfo[0].pNext = pipelineRenderingInfo
+    pipelineInfo[0].stageCount = 2; pipelineInfo[0].pStages = shaderStages
     pipelineInfo[0].pVertexInputState = vertexInputInfo
     pipelineInfo[0].pInputAssemblyState = inputAssembly
     pipelineInfo[0].pViewportState = viewportState
@@ -198,6 +80,7 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
 
     return { depthImage = depthImage, depthMemory = depthMemory, depthImageView = depthImageView, vertModule = pVertModule[0], fragModule = pFragModule[0], pipeline = pPipeline[0], pipelineLayout = pipelineLayout }
 end
+
 function GraphicsPipeline.Destroy(vk, core_state, gfx_state)
     print("[TEARDOWN] Destroying Graphics Pipeline & Depth Buffer...")
     if not gfx_state then return end

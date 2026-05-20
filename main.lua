@@ -91,8 +91,8 @@ ffi.cdef[[
         uint32_t _padding[3];
     } SwarmCommand;
 
-    // Structs
-    typedef struct __attribute__((packed, aligned(8))) {
+    // BACK TO PERFECT 192-BYTE NATURAL ALIGNMENT. NO PACKED!
+    typedef struct {
         uint64_t pipeline_id;
         uint64_t descriptor_set;
         uint32_t index_count;
@@ -106,15 +106,12 @@ ffi.cdef[[
         int16_t  scissor_y;
         uint16_t scissor_w;
         uint16_t scissor_h;
-        uint8_t  cull_mode;
-        uint8_t  front_face;
-        uint8_t  depth_test;
-        uint8_t  depth_write;
-        uint8_t  depth_compare;
-        uint8_t  topology;
-        uint8_t  _pad0[2];
-        uint32_t viewport_scale_id;
-        uint8_t  _padding[4];
+        uint8_t  cull_mode;         // 1 byte
+        uint8_t  depth_test;        // 1 byte
+        uint8_t  depth_write;       // 1 byte
+        uint8_t  depth_compare;     // 1 byte
+        uint32_t viewport_scale_id; // 4 bytes
+        uint8_t  _padding[8];       // exactly 8 bytes pad remaining
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
@@ -153,15 +150,12 @@ ffi.cdef[[
         void* vkQueuePresentKHR;
         void* pfnBegin;
         void* pfnEnd;
-
+        // ONLY THE CORE 4 DYNAMIC STATES
         void* pfnSetCullMode;
-        void* pfnSetFrontFace;
         void* pfnSetDepthTestEnable;
         void* pfnSetDepthWriteEnable;
         void* pfnSetDepthCompareOp;
-        void* pfnSetPrimitiveTopology;
     } RenderThreadInit;
-
 
     // Subsystem Interfaces
     void vmath_init_workers(int num_threads);
@@ -289,13 +283,11 @@ local function main()
     wsi.pfnBegin = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR"))
     wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
 
+    -- INSIDE main() WSI SETUP:
     wsi.pfnSetCullMode = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT"))
-    wsi.pfnSetFrontFace = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetFrontFaceEXT"))
     wsi.pfnSetDepthTestEnable = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT"))
     wsi.pfnSetDepthWriteEnable = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT"))
     wsi.pfnSetDepthCompareOp = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT"))
-    wsi.pfnSetPrimitiveTopology = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdSetPrimitiveTopologyEXT"))
-
 
     ffi.C.vibe_ring_init_wsi(wsi)
     ffi.C.vibe_start_render_thread()
@@ -538,61 +530,40 @@ local function main()
             -- 2. Populate Draw Queue Data (DUAL DISPATCH)
             local half_count = math.floor(pc.particle_count / 2)
 
-            -- COMMAND 0: The Ice Shard Swarm (First Half)
             local cmd0 = current_queue_ptr[0]
             cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
             cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-            cmd0.index_count = 24
-            cmd0.first_index = 0
-            cmd0.vertex_offset = 0
-            cmd0.instance_count = half_count
-            cmd0.first_instance = 0
+            cmd0.index_count = 24; cmd0.first_index = 0; cmd0.vertex_offset = 0
+     	    cmd0.instance_count = half_count; cmd0.first_instance = 0
             ffi.copy(cmd0.push_constants, pc, 128)
 
-            -- COMMAND 0: 3D ICE SHARDS (Opaque, Culling On, Depth On)
             cmd0.scissor_x = 0; cmd0.scissor_y = 0
             cmd0.scissor_w = sc_state.extent.width; cmd0.scissor_h = sc_state.extent.height
             cmd0.cull_mode = 2     -- VK_CULL_MODE_BACK_BIT
-            cmd0.front_face = 1    -- VK_FRONT_FACE_COUNTER_CLOCKWISE <-- ADD
-            cmd0.topology = 3      -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST <-- ADD
             cmd0.depth_test = 1    -- VK_TRUE
             cmd0.depth_write = 1   -- VK_TRUE
-            cmd0.depth_compare = 4 -- VK_COMPARE_OP_GREATER
+            cmd0.depth_compare = 4 -- VK_COMPARE_OP_GREATER (Reverse-Z)
             cmd0.viewport_scale_id = 0
 
-            -- COMMAND 1: The Asteroid Cubes (Second Half)
             local cmd1 = current_queue_ptr[1]
             cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
             cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-            cmd1.index_count = 36
-            cmd1.first_index = 24  -- Start reading after the 24 Ice Shard indices
-            cmd1.vertex_offset = 0
-            cmd1.instance_count = half_count
-            cmd1.first_instance = half_count -- Magic: Reads the second half of physics data!
-            -- Tint the cubes differently via PushConstants
-            local pc_cube = ffi.new("PushConstants")
-            ffi.copy(pc_cube, pc, 128)
-            pc_cube.target_state = 99 -- Hacky color flag for the shader
+            cmd1.index_count = 36; cmd1.first_index = 24; cmd1.vertex_offset = 0
+            cmd1.instance_count = half_count; cmd1.first_instance = half_count
+            local pc_cube = ffi.new("PushConstants"); ffi.copy(pc_cube, pc, 128); pc_cube.target_state = 99
             ffi.copy(cmd1.push_constants, pc_cube, 128)
 
-            -- COMMAND 1: CUBES (UI/Overlay test)
             cmd1.scissor_x = 0; cmd1.scissor_y = 0
             cmd1.scissor_w = sc_state.extent.width; cmd1.scissor_h = sc_state.extent.height
             cmd1.cull_mode = 0     -- VK_CULL_MODE_NONE
-            cmd1.front_face = 1    -- VK_FRONT_FACE_COUNTER_CLOCKWISE <-- ADD
-            cmd1.topology = 3      -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST <-- ADD
             cmd1.depth_test = 0    -- VK_FALSE
             cmd1.depth_write = 0   -- VK_FALSE
             cmd1.depth_compare = 7 -- VK_COMPARE_OP_ALWAYS
             cmd1.viewport_scale_id = 0
 
-            -- 3. Bind the queue to the Ring Buffer packet
             packet.draw_queue = current_queue_ptr
-            packet.draw_count = 2 -- Now telling C to loop twice!
-
-            -- 4. Cross the boundary ONCE
+            packet.draw_count = 2
             ffi.C.vibe_ring_submit(write_idx)
-
             frame_count = frame_count + 1
         end
         sys_sleep(10)
