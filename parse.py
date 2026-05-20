@@ -167,7 +167,7 @@ def generate_lua_ffi_cdef(xml_path):
     # 4. Emit to C Block
     ffi_declarations.append("\n// --- Enum Values ---")
     ffi_declarations.append("enum {")
-    constants_64 = []
+    lua_64_constants = []
     emitted_names = set()
 
     for name, value in raw_enums.items():
@@ -175,7 +175,7 @@ def generate_lua_ffi_cdef(xml_path):
         emitted_names.add(name)
 
         if "ULL" in value or "ull" in value:
-            constants_64.append(f"static const unsigned long long {name} = {value};")
+            lua_64_constants.append(f"_G.{name} = {value}")
         else:
             ffi_declarations.append(f"    {name} = {value},")
 
@@ -185,15 +185,11 @@ def generate_lua_ffi_cdef(xml_path):
         if resolved_val is not None:
             emitted_names.add(name)
             if "ULL" in resolved_val or "ull" in resolved_val:
-                constants_64.append(f"static const unsigned long long {name} = {resolved_val};")
+                lua_64_constants.append(f"_G.{name} = {resolved_val}")
             else:
                 ffi_declarations.append(f"    {name} = {resolved_val},")
 
     ffi_declarations.append("};")
-
-    if constants_64:
-        ffi_declarations.append("\n// --- 64-Bit Constants (Routed out of enum block) ---")
-        ffi_declarations.extend(constants_64)
 
     # 1. Grab Handles
     ffi_declarations.append("// --- Handles ---")
@@ -357,7 +353,7 @@ def generate_lua_ffi_cdef(xml_path):
         # Print the PFN typedef so ffi.cast works perfectly!
         ffi_declarations.append(f"typedef {return_type} (*PFN_{name_elem.text})({param_str});")
 
-    return ffi_declarations
+    return ffi_declarations, lua_64_constants ### PUT IT HERE?
 
 if __name__ == "__main__":
     output_filename = "vulkan_headers.lua"
@@ -369,12 +365,6 @@ if __name__ == "__main__":
 
         # Base types needed to keep LuaJIT happy
         f.write("// --- Base Types ---\n")
-        # f.write("typedef uint32_t VkFlags;\n")
-        # f.write("typedef uint64_t VkFlags64;\n")
-        # f.write("typedef uint64_t VkDeviceSize;\n")
-        # f.write("typedef uint32_t VkBool32;\n")
-        # f.write("typedef uint64_t VkDeviceAddress;\n")
-
         f.write("typedef void* PFN_vkVoidFunction;\n")
         f.write("typedef void* PFN_vkAllocationFunction;\n")
         f.write("typedef void* PFN_vkReallocationFunction;\n")
@@ -383,12 +373,20 @@ if __name__ == "__main__":
         f.write("typedef void* PFN_vkInternalFreeNotification;\n\n")
 
         # Generate and write the parsed declarations
-        declarations = generate_lua_ffi_cdef("vk.xml")
+        declarations, lua_64 = generate_lua_ffi_cdef("vk.xml")
+
         for decl in declarations:
             f.write(decl + "\n")
 
-        # --- LUA MODULE FOOTER ---
+        # --- LUA MODULE FOOTER (CLOSE CDEF) ---
         f.write("]]\n")
-        f.write("return true\n")
+
+        # --- NATIVE LUA 64-BIT CONSTANTS ---
+        if lua_64:
+            f.write("\n-- --- 64-Bit Constants (Routed to Native Lua) ---\n")
+            for lua_const in lua_64:
+                f.write(lua_const + "\n")
+
+        f.write("\nreturn true\n")
 
     print(f"[PARSE] Successfully generated {output_filename}!")
