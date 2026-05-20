@@ -1,4 +1,3 @@
-[LUA FATAL ERROR] .\vulkan_headers.lua:5524: malformed number near '70368744177664' at line 1382
+[LUA FATAL ERROR] .\vulkan_headers.lua:5526: unexpected symbol near 'VK_FILTER_CUBIC_EXT' at line 1468
 
-
-    VK_STRUCTURE_TYPE_HOST_IMAGE_COPY_DEVICE_PERFORMANCE_QUERY = 1000270009,
+    VK_ERROR_INVALID_SHADER_NV = -1000012000,
