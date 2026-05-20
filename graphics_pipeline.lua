@@ -173,16 +173,26 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     colorBlending.attachmentCount = 1
     colorBlending.pAttachments = colorBlendAttachment
 
-    -- ========================================================
     -- 7. DYNAMIC RENDERING LINK & FINAL BUILD
-    -- ========================================================
     local colorFormats = ffi.new("int32_t[1]", {colorFormat})
 
-    local dynamicStates = ffi.new("int32_t[2]", { 0, 1 });
+    local VK_DYNAMIC_STATE_CULL_MODE_EXT = 1000267001
+    local VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT = 1000267007
+    local VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT = 1000267008
+    local VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT = 1000267009
+
+    local dynamicStates = ffi.new("int32_t[6]", {
+        0, -- Viewport
+        1, -- Scissor
+        VK_DYNAMIC_STATE_CULL_MODE_EXT,
+        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT,
+        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
+    })
 
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo", {
-        sType = 27, -- STRICT FIX: 27 is VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
-        dynamicStateCount = 2,
+        sType = 27,
+        dynamicStateCount = 6, -- Do not leave this at 2!
         pDynamicStates = dynamicStates
     })
 

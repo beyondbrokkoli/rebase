@@ -94,14 +94,23 @@ ffi.cdef[[
     typedef struct {
         uint64_t pipeline_id;
         uint64_t descriptor_set;
-        uint32_t index_count;       // Swapped from vertex_count
+        uint32_t index_count;
         uint32_t instance_count;
-        uint32_t first_index;       // Swapped from first_vertex
-        int32_t  vertex_offset;     // NEW: Allows us to shift the starting vertex
+        uint32_t first_index;
+        int32_t vertex_offset;
         uint32_t first_instance;
-        uint32_t _pad_cmd;          // NEW: Keeps the 8-byte alignment perfect
-        uint8_t  push_constants[128];
-        uint8_t  _padding[24];      // Adjusted to keep exactly 192 bytes
+        uint32_t _pad_cmd;
+        uint8_t push_constants[128];
+        // --- 24 BYTES PADDING RECLAIMED ---
+        int16_t scissor_x;        // 2 bytes
+        int16_t scissor_y;        // 2 bytes
+        uint16_t scissor_w;       // 2 bytes
+        uint16_t scissor_h;       // 2 bytes
+        uint8_t cull_mode;        // 1 byte
+        uint8_t depth_test;       // 1 byte
+        uint8_t depth_write;      // 1 byte
+        uint8_t depth_compare_op; // 1 byte
+        uint8_t _reserved[12];    // 12 bytes
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
@@ -141,6 +150,10 @@ ffi.cdef[[
         void* vkQueuePresentKHR;
         void* pfnBegin;
         void* pfnEnd;
+        void* pfnSetCullMode;
+        void* pfnSetDepthTestEnable;
+        void* pfnSetDepthWriteEnable;
+        void* pfnSetDepthCompareOp;
     } RenderThreadInit;
 
     // Subsystem Interfaces
@@ -260,6 +273,11 @@ local function main()
     wsi.vkQueuePresentKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueuePresentKHR"))
     wsi.pfnBegin = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR"))
     wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
+
+    wsi.pfnSetCullMode = vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT")
+    wsi.pfnSetDepthTestEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT")
+    wsi.pfnSetDepthWriteEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT")
+    wsi.pfnSetDepthCompareOp = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT")
 
     ffi.C.vibe_ring_init_wsi(wsi)
     ffi.C.vibe_start_render_thread()
@@ -390,6 +408,11 @@ local function main()
                     new_wsi.pfnBegin = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR"))
                     new_wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
 
+                    new_wsi.pfnSetCullMode = vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT")
+                    new_wsi.pfnSetDepthTestEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT")
+                    new_wsi.pfnSetDepthWriteEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT")
+                    new_wsi.pfnSetDepthCompareOp = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT")
+
                     ffi.C.vibe_ring_init_wsi(new_wsi)
                     ffi.C.vibe_start_render_thread()
                 end
@@ -515,21 +538,41 @@ local function main()
             cmd0.first_instance = 0
             ffi.copy(cmd0.push_constants, pc, 128)
 
+            -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
+            cmd0.scissor_x = 0
+            cmd0.scissor_y = 0
+            cmd0.scissor_w = sc_state.extent.width
+            cmd0.scissor_h = sc_state.extent.height
+            cmd0.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
+            cmd0.depth_test = 1        -- VK_TRUE
+            cmd0.depth_write = 1       -- VK_TRUE
+            cmd0.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
+
+
             -- COMMAND 1: The Asteroid Cubes (Second Half)
             local cmd1 = current_queue_ptr[1]
             cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
             cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
             cmd1.index_count = 36
-            cmd1.first_index = 24  -- Start reading after the 24 Ice Shard indices
+            cmd1.first_index = 24
             cmd1.vertex_offset = 0
             cmd1.instance_count = half_count
-            cmd1.first_instance = half_count -- Magic: Reads the second half of physics data!
+            cmd1.first_instance = half_count
 
-            -- Tint the cubes differently via PushConstants
             local pc_cube = ffi.new("PushConstants")
             ffi.copy(pc_cube, pc, 128)
-            pc_cube.target_state = 99 -- Hacky color flag for the shader
+            pc_cube.target_state = 99
             ffi.copy(cmd1.push_constants, pc_cube, 128)
+
+            -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
+            cmd1.scissor_x = 0
+            cmd1.scissor_y = 0
+            cmd1.scissor_w = sc_state.extent.width
+            cmd1.scissor_h = sc_state.extent.height
+            cmd1.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
+            cmd1.depth_test = 1        -- VK_TRUE
+            cmd1.depth_write = 1       -- VK_TRUE
+            cmd1.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
 
             -- 3. Bind the queue to the Ring Buffer packet
             packet.draw_queue = current_queue_ptr

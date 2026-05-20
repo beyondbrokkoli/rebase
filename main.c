@@ -296,20 +296,27 @@ typedef struct {
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
-// ==========================================
 // DATA-ORIENTED RENDER QUEUE STRUCTS
-// ==========================================
 typedef struct {
     uint64_t pipeline_id;
     uint64_t descriptor_set;
-    uint32_t index_count;       // Swapped from vertex_count
+    uint32_t index_count;
     uint32_t instance_count;
-    uint32_t first_index;       // Swapped from first_vertex
-    int32_t  vertex_offset;     // NEW: Allows us to shift the starting vertex
+    uint32_t first_index;
+    int32_t vertex_offset;
     uint32_t first_instance;
-    uint32_t _pad_cmd;          // NEW: Keeps the 8-byte alignment perfect
-    uint8_t  push_constants[128];
-    uint8_t  _padding[24];      // Adjusted to keep exactly 192 bytes
+    uint32_t _pad_cmd;
+    uint8_t push_constants[128];
+    // --- 24 BYTES PADDING RECLAIMED ---
+    int16_t scissor_x;        // 2 bytes
+    int16_t scissor_y;        // 2 bytes
+    uint16_t scissor_w;       // 2 bytes
+    uint16_t scissor_h;       // 2 bytes
+    uint8_t cull_mode;        // 1 byte
+    uint8_t depth_test;       // 1 byte
+    uint8_t depth_write;      // 1 byte
+    uint8_t depth_compare_op; // 1 byte
+    uint8_t _reserved[12];    // 12 bytes
 } DrawCommand;
 
 _Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
@@ -367,6 +374,11 @@ typedef struct {
     void* pfnEnd;
 } RenderThreadInit;
 
+typedef void (VKAPI_PTR *PFN_vkCmdSetCullModeEXT)(VkCommandBuffer, uint32_t);
+typedef void (VKAPI_PTR *PFN_vkCmdSetDepthTestEnableEXT)(VkCommandBuffer, uint32_t);
+typedef void (VKAPI_PTR *PFN_vkCmdSetDepthWriteEnableEXT)(VkCommandBuffer, uint32_t);
+typedef void (VKAPI_PTR *PFN_vkCmdSetDepthCompareOpEXT)(VkCommandBuffer, uint32_t);
+
 typedef struct {
     alignas(64) RenderPacket packets[3];
     alignas(64) _Atomic int ready_idx;
@@ -408,6 +420,11 @@ EXPORT void vibe_ring_submit(int idx) {
 EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
+
+    PFN_vkCmdSetCullModeEXT vkCmdSetCullModeEXT = (PFN_vkCmdSetCullModeEXT)g_wsi.pfnSetCullMode;
+    PFN_vkCmdSetDepthTestEnableEXT vkCmdSetDepthTestEnableEXT = (PFN_vkCmdSetDepthTestEnableEXT)g_wsi.pfnSetDepthTestEnable;
+    PFN_vkCmdSetDepthWriteEnableEXT vkCmdSetDepthWriteEnableEXT = (PFN_vkCmdSetDepthWriteEnableEXT)g_wsi.pfnSetDepthWriteEnable;
+    PFN_vkCmdSetDepthCompareOpEXT vkCmdSetDepthCompareOpEXT = (PFN_vkCmdSetDepthCompareOpEXT)g_wsi.pfnSetDepthCompareOp;
 
     // 1. Compute Dispatch (Preserved)
     if (p->comp_pipeline != 0) {
@@ -507,6 +524,17 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipelineLayout)p->gfx_layout, 0, 1, &dset, 0, NULL);
             current_descriptor = draw->descriptor_set;
         }
+
+        // Apply Dynamic States from the payload
+        VkRect2D scissor = {
+            .offset = { (int32_t)draw->scissor_x, (int32_t)draw->scissor_y },
+            .extent = { (uint32_t)draw->scissor_w, (uint32_t)draw->scissor_h }
+        };
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        vkCmdSetCullModeEXT(cmd, draw->cull_mode);
+        vkCmdSetDepthTestEnableEXT(cmd, draw->depth_test);
+        vkCmdSetDepthWriteEnableEXT(cmd, draw->depth_write);
+        vkCmdSetDepthCompareOpEXT(cmd, draw->depth_compare_op);
 
         vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
 
