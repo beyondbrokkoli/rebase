@@ -106,6 +106,8 @@ def generate_lua_ffi_cdef(xml_path):
     ffi_declarations.append("\n// --- Enum Values ---")
     ffi_declarations.append("enum {")
 
+    seen_enum_names = set() # <--- THE DEFENDER SHIELD
+
     # Find all enum groups that are actual enums (not bitmasks)
     for enums_node in root.findall('.//enums[@type="enum"]'):
         for enum_tag in enums_node.findall('enum'):
@@ -116,8 +118,9 @@ def generate_lua_ffi_cdef(xml_path):
             if not value:
                 value = enum_tag.get('alias')
 
-            if name and value:
+            if name and value and name not in seen_enum_names:
                 ffi_declarations.append(f"    {name} = {value},")
+                seen_enum_names.add(name)
 
     # [THE PATCH PART 2] Extract Extension Enum Values dynamically
     for ext in root.findall('.//extensions/extension'):
@@ -135,10 +138,13 @@ def generate_lua_ffi_cdef(xml_path):
 
                     # Vulkan Extension Formula
                     val = direction * (1000000000 + (ext_number - 1) * 1000 + offset)
-                    ffi_declarations.append(f"    {name} = {val},")
 
-    ffi_declarations.append("};") # <--- CLOSES THE ENUM BLOCK!
+                    # Defend against duplicates here as well!
+                    if name and name not in seen_enum_names:
+                        ffi_declarations.append(f"    {name} = {val},")
+                        seen_enum_names.add(name)
 
+    ffi_declarations.append("};")
     # 1. Grab Handles
     ffi_declarations.append("// --- Handles ---")
     for handle in root.findall('.//types/type[@category="handle"]'):
