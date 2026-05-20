@@ -11,7 +11,7 @@ $ ./boot.exe
 [LUA] Window Surface Linked from Main Thread!
 [LUA] Hardware GPU Selected!
 [LUA] Logical Device Created!
-[DEBUG] Device Pointer in core: cdata<struct VkDevice_T *>: 0x02f5cd1cba48
+[DEBUG] Device Pointer in core: cdata<struct VkDevice_T *>: 0x027fecc0ca38
 [MEMORY] ReBAR Supported! Streaming directly to VRAM.
 [MEMORY] Allocated & Mapped VRAM Buffer: MASTER_INDEX_BLOCK (45.78 MB)
 [MEMORY] Allocated Fast CPU RAM: px (3.05 MB)
@@ -32,98 +32,21 @@ $ ./boot.exe
 [GRAPHICS] Building Reverse-Z Depth Buffer and Shader Modules...
 [GRAPHICS] Swarm Pipeline Successfully Compiled!
 [RENDERER] Forging Synchronization Primitives...
-[LUA CO] Compiling Geometry...
-[C-CORE] Async Render Thread Online.
+[LUA CO] Compiling Geometry...[C-CORE] Async Render Thread Online.
+
 [LUA CO] Entering Flattened Render Loop...
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
 MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_FRONT_FACE state is dynamic, but the command buffer never called vkCmdSetFrontFace.
 VkPipelineRasterizationStateCreateInfo::rasterizerDiscardEnable was VK_FALSE in the last bound graphics pipeline.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulk
-an.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
+The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
 MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to
-dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_FRONT_FACE state is dynamic, but the command buffer never called vkCmdSetFrontFace.
-VkPipelineRasterizationStateCreateInfo::rasterizerDiscardEnable was VK_FALSE in the last bound graphics pipeline.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulk
-an.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to
-dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_FRONT_FACE state is dynamic, but the command buffer never called vkCmdSetFrontFace.
-VkPipelineRasterizationStateCreateInfo::rasterizerDiscardEnable was VK_FALSE in the last bound graphics pipeline.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulk
-an.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to
-dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_FRONT_FACE state is dynamic, but the command buffer never called vkCmdSetFrontFace.
-VkPipelineRasterizationStateCreateInfo::rasterizerDiscardEnable was VK_FALSE in the last bound graphics pipeline.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulk
-an.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to
-dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_FRONT_FACE state is dynamic, but the command buffer never called vkCmdSetFrontFace.
-VkPipelineRasterizationStateCreateInfo::rasterizerDiscardEnable was VK_FALSE in the last bound graphics pipeline.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulk
-an.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to
-dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_FRONT_FACE state is dynamic, but the command buffer never called vkCmdSetFrontFace.
-VkPipelineRasterizationStateCreateInfo::rasterizerDiscardEnable was VK_FALSE in the last bound graphics pipeline.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the V
-K_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by th
-is command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
+The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
 
 
 [VULKAN LAYER ENFORCER]
@@ -136,7 +59,7 @@ The Vulkan spec states: If a shader object is bound to any graphics stage or a g
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
 MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by thiscommand, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
+The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
 
 
 [VULKAN LAYER ENFORCER]
@@ -149,7 +72,7 @@ The Vulkan spec states: If a shader object is bound to any graphics stage or a g
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
 MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by thiscommand, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
+The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by this command, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
 
 
 [VULKAN LAYER ENFORCER]
@@ -158,40 +81,3 @@ MESSAGE: vkCmdDrawIndexed(): VK_DYNAMIC_STATE_FRONT_FACE state is dynamic, but t
 VkPipelineRasterizationStateCreateInfo::rasterizerDiscardEnable was VK_FALSE in the last bound graphics pipeline.
 The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
 
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by thiscommand, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: (Warning - This VUID has now been reported 10 times, which is the duplicate_message_limit value, this will be the last time reporting it).
-vkCmdDrawIndexed(): VK_DYNAMIC_STATE_FRONT_FACE state is dynamic, but the command buffer never called vkCmdSetFrontFace.
-VkPipelineRasterizationStateCreateInfo::rasterizerDiscardEnable was VK_FALSE in the last bound graphics pipeline.
-The Vulkan spec states: If a shader object is bound to any graphics stage or a graphics pipeline is bound which was created with the VK_DYNAMIC_STATE_FRONT_FACE dynamic state enabled, and the current value of rasterizerDiscardEnable is VK_FALSE, then vkCmdSetFrontFace must have been called and not subsequently invalidated in the current command buffer prior to this drawing command (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-07841)
-
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: (Warning - This VUID has now been reported 10 times, which is the duplicate_message_limit value, this will be the last time reporting it).
-vkCmdDrawIndexed(): VkPipeline 0x190000000019 doesn't set up VK_DYNAMIC_STATE_CULL_MODE|VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, but since the vkCmdBindPipeline, the related dynamic state commands (vkCmdSetCullMode, vkCmdSetDepthTestEnable) have been called in this command buffer.
-The Vulkan spec states: If a pipeline is bound to the pipeline bind point used by this command, there must not have been any calls to dynamic state setting commands for any state specified statically in the VkPipeline object bound to the pipeline bind point used by thiscommand, since that pipeline was bound (https://docs.vulkan.org/spec/latest/chapters/drawing.html#VUID-vkCmdDrawIndexed-None-08608)
-
-[LUA IO] ESCAPE PRESSED. Executing Teardown...
-
-[C-CORE] Shutdown triggered. Waiting for Lua VM...
-[LUA CO] Render Loop Terminated. Frames: 111
-[TEARDOWN] Terminating Async Render Thread...
-[C-CORE] Async Render Thread gracefully terminated and pool destroyed.
-[C-CORE] Async Render Thread gracefully terminated for rebuild.
-[TEARDOWN] Dismantling Renderer Sync Objects...
-[TEARDOWN] Destroying Graphics Pipeline & Depth Buffer...
-[TEARDOWN] Destroying Compute Pipeline...
-[TEARDOWN] Deconstructing Descriptors...
-[TEARDOWN] Destroying Swapchain & Image Views...
-[TEARDOWN] Freeing VRAM Arenas...
-[TEARDOWN] Shutting down Vulkan Core...
-[LUA-OS-THREAD] VM Destroyed.
-[C-CORE] Clean Exit.
