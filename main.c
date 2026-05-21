@@ -354,9 +354,12 @@ typedef struct __attribute__((packed, aligned(64))) {
 
 _Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 bytes!");
 
-// ==========================================
 // C-ONLY SYNCHRONIZATION (HIDDEN FROM LUA)
-// ==========================================
+
+#define SLOT_FREE 0
+#define SLOT_READY 1
+#define SLOT_RENDERING 2
+
 typedef struct {
     VkDevice device;
     VkQueue queue;
@@ -381,61 +384,46 @@ typedef struct {
     void* pfnSetDepthCompareOp;
 } RenderThreadInit;
 
+// 1. Upgrade the RenderRing to an Atomic State Machine
 typedef struct {
     alignas(64) RenderPacket packets[3];
-    alignas(64) _Atomic int ready_idx;
-    alignas(64) _Atomic int read_idx;
+    alignas(64) _Atomic int slot_state[3]; // Replaces ready/read idx
 } RenderRing;
 
-static RenderRing g_ring = { .ready_idx = -1, .read_idx = -1 };
+static RenderRing g_ring; // C guarantees zero-initialization (SLOT_FREE)
 static RenderThreadInit g_wsi;
 static vmath_thread_t g_render_thread;
 static atomic_int g_render_thread_active = 0;
 
 EXPORT void vibe_ring_init_wsi(RenderThreadInit* wsi) {
     g_wsi = *wsi;
-
-    // Purge stale packets across WSI rebuilds
-    atomic_store_explicit(&g_ring.ready_idx, -1, memory_order_release);
-    atomic_store_explicit(&g_ring.read_idx, -1, memory_order_release);
+    // Purge stale packets and unlock all memory across WSI rebuilds
+    for (int i = 0; i < 3; i++) {
+        atomic_store_explicit(&g_ring.slot_state[i], SLOT_FREE, memory_order_release);
+    }
 }
 
 EXPORT RenderPacket* vibe_ring_get_packet(int idx) {
     return &g_ring.packets[idx];
 }
-#define LOCKSTEP 1
-#if LOCKSTEP
+
 EXPORT int vibe_ring_get_write_idx() {
-    // 1. Maintain a strict, cyclical timeline (0, 1, 2)
     static uint32_t current_lua_frame = 0;
     int idx = current_lua_frame % 3;
-    current_lua_frame++;
 
-    // 2. THE LOCKSTEP: Wait on the GPU fence BEFORE returning to Lua.
-    // This physically prevents Lua from executing AVX2 and overwriting VRAM
-    // if the GPU is still rendering this specific chunk.
-    if (g_wsi.vkWaitForFences && g_wsi.in_flight[idx] != VK_NULL_HANDLE) {
-        PFN_vkWaitForFences pfnWait = (PFN_vkWaitForFences)g_wsi.vkWaitForFences;
-        pfnWait(g_wsi.device, 1, &g_wsi.in_flight[idx], VK_TRUE, UINT64_MAX);
+    // THE TRY-LOCK: If C/GPU is still holding this chunk, ABORT.
+    // This allows Lua to drop the render frame but keep computing physics/inputs instantly.
+    if (atomic_load_explicit(&g_ring.slot_state[idx], memory_order_acquire) != SLOT_FREE) {
+        return -1;
     }
 
+    current_lua_frame++;
     return idx;
 }
-#else
-EXPORT int vibe_ring_get_write_idx() {
-    int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
-    int read = atomic_load_explicit(&g_ring.read_idx, memory_order_acquire);
-
-    // Mathematical selection of the unoccupied slot
-    if (ready != read && ready >= 0 && read >= 0) {
-        return 3 - (ready + read);
-    }
-    return (ready == -1) ? 0 : (ready + 1) % 3;
-}
-#endif
 
 EXPORT void vibe_ring_submit(int idx) {
-    atomic_store_explicit(&g_ring.ready_idx, idx, memory_order_release);
+    // Hand it off to the C-thread
+    atomic_store_explicit(&g_ring.slot_state[idx], SLOT_READY, memory_order_release);
 }
 
 EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
@@ -588,7 +576,6 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &presentBarrier);
     vkEndCommandBuffer(cmd);
 }
-#if LOCKSTEP
 THREAD_FUNC render_thread_loop(void* arg) {
     printf("[C-CORE] Async Render Thread Online.\n");
 
@@ -597,7 +584,7 @@ THREAD_FUNC render_thread_loop(void* arg) {
     VkCommandPoolCreateInfo pool_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = 0 // Assuming Graphics queue index is 0 in your setup
+        .queueFamilyIndex = 0 
     };
     vkCreateCommandPool(g_wsi.device, &pool_info, NULL, &cmd_pool);
 
@@ -610,7 +597,7 @@ THREAD_FUNC render_thread_loop(void* arg) {
     };
     vkAllocateCommandBuffers(g_wsi.device, &alloc_info, cmd_buffers);
 
-    int local_read = -1;
+    int local_read = 0; // C-thread loops 0, 1, 2 sequentially to match Lua
 
     // Typecast Vulkan WSI Pointers
     PFN_vkWaitForFences pfnWait = (PFN_vkWaitForFences)g_wsi.vkWaitForFences;
@@ -622,23 +609,38 @@ THREAD_FUNC render_thread_loop(void* arg) {
     while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) &&
            atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
 
-        // 2. Triad Consumer Handoff
-        int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
-        if (ready == -1 || ready == local_read) {
-            SLEEP_MS(1);
-            continue; // Spinlock: Lua hasn't finished a new frame yet
+        // 2. THE FENCE GARBAGE COLLECTOR
+        // C-thread acts as the sole owner of the fences. It checks them asynchronously.
+        for (int i = 0; i < 3; i++) {
+            if (atomic_load_explicit(&g_ring.slot_state[i], memory_order_acquire) == SLOT_RENDERING) {
+                // pfnWait with a timeout of 0 acts as a non-blocking vkGetFenceStatus
+                if (pfnWait(g_wsi.device, 1, &g_wsi.in_flight[i], VK_TRUE, 0) == VK_SUCCESS) {
+                    // The GPU is done! Free the memory so Lua can overwrite it.
+                    atomic_store_explicit(&g_ring.slot_state[i], SLOT_FREE, memory_order_release);
+                }
+            }
         }
-        local_read = ready;
-        atomic_store_explicit(&g_ring.read_idx, local_read, memory_order_release);
 
-        // --- THE UNIFIED TIMELINE ---
-        // We use the exact chunk index Lua gave us for EVERYTHING.
+        // 3. ACQUIRE NEW WORK FROM LUA
+        if (atomic_load_explicit(&g_ring.slot_state[local_read], memory_order_acquire) != SLOT_READY) {
+            SLEEP_MS(1);
+            continue; // Lua hasn't finished calculating this frame yet
+        }
+
+        // We claim it, locking Lua out of it until the GPU finishes
+        atomic_store_explicit(&g_ring.slot_state[local_read], SLOT_RENDERING, memory_order_release);
+
         uint32_t sync_frame = (uint32_t)local_read;
+        local_read = (local_read + 1) % 3; // Advance to wait for the next frame
 
         RenderPacket* p = &g_ring.packets[sync_frame];
         VkCommandBuffer cmd = cmd_buffers[sync_frame];
 
-        // 3. WSI Lifecycle
+        // 4. WSI Lifecycle
+        // We know the fence is ready because the Garbage Collector just freed it,
+        // but we explicitly wait UINT64_MAX to strictly fulfill the Vulkan spec requirements.
+        pfnWait(g_wsi.device, 1, &g_wsi.in_flight[sync_frame], VK_TRUE, UINT64_MAX);
+
         uint32_t img_idx;
         VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX,
                                   g_wsi.image_available[sync_frame], VK_NULL_HANDLE, &img_idx);
@@ -649,10 +651,8 @@ THREAD_FUNC render_thread_loop(void* arg) {
             continue;
         }
 
-        // RESET the fence for this chunk so the GPU can signal it later
         pfnReset(g_wsi.device, 1, &g_wsi.in_flight[sync_frame]);
 
-        // 4. Dynamic Swapchain Injection & Command Record
         p->swapchain_image = g_wsi.swapchain_images[img_idx];
         p->swapchain_view  = g_wsi.swapchain_views[img_idx];
 
@@ -669,17 +669,14 @@ THREAD_FUNC render_thread_loop(void* arg) {
             .commandBufferCount = 1,
             .pCommandBuffers = &cmd,
             .signalSemaphoreCount = 1,
-            // Use img_idx to guarantee 1:1 mapping with the acquired image
             .pSignalSemaphores = &g_wsi.render_finished[img_idx]
         };
-        // Tell the GPU to signal Lua's fence when it finishes this chunk
         pfnSubmit(g_wsi.queue, 1, &submitInfo, g_wsi.in_flight[sync_frame]);
 
         // 6. Present
         VkPresentInfoKHR presentInfo = {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            // Wait on the semaphore tied to this specific image
             .pWaitSemaphores = &g_wsi.render_finished[img_idx],
             .swapchainCount = 1,
             .pSwapchains = &g_wsi.swapchain,
@@ -687,116 +684,14 @@ THREAD_FUNC render_thread_loop(void* arg) {
         };
         pfnPresent(g_wsi.queue, &presentInfo);
     }
-
+    
     vkDeviceWaitIdle(g_wsi.device);
     vkFreeCommandBuffers(g_wsi.device, cmd_pool, 3, cmd_buffers);
     vkDestroyCommandPool(g_wsi.device, cmd_pool, NULL);
     printf("[C-CORE] Async Render Thread gracefully terminated and pool destroyed.\n");
     return NULL;
 }
-#else
-THREAD_FUNC render_thread_loop(void* arg) {
-    printf("[C-CORE] Async Render Thread Online.\n");
 
-    // 1. C-Owned Command Pool Setup
-    VkCommandPool cmd_pool;
-    VkCommandPoolCreateInfo pool_info = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = 0 // Assuming Graphics queue index is 0 in your setup
-    };
-    vkCreateCommandPool(g_wsi.device, &pool_info, NULL, &cmd_pool);
-
-    VkCommandBuffer cmd_buffers[3];
-    VkCommandBufferAllocateInfo alloc_info = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = cmd_pool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 3
-    };
-    vkAllocateCommandBuffers(g_wsi.device, &alloc_info, cmd_buffers);
-
-    uint32_t current_frame = 0;
-    int local_read = -1;
-
-    // Typecast Vulkan WSI Pointers
-    PFN_vkWaitForFences pfnWait = (PFN_vkWaitForFences)g_wsi.vkWaitForFences;
-    PFN_vkAcquireNextImageKHR pfnAcquire = (PFN_vkAcquireNextImageKHR)g_wsi.vkAcquireNextImageKHR;
-    PFN_vkResetFences pfnReset = (PFN_vkResetFences)g_wsi.vkResetFences;
-    PFN_vkQueueSubmit pfnSubmit = (PFN_vkQueueSubmit)g_wsi.vkQueueSubmit;
-    PFN_vkQueuePresentKHR pfnPresent = (PFN_vkQueuePresentKHR)g_wsi.vkQueuePresentKHR;
-
-    while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) &&
-           atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
-        // 2. Triad Consumer Handoff
-        int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
-        if (ready == -1 || ready == local_read) {
-            SLEEP_MS(1);
-            continue; // Spinlock: Lua hasn't finished a new frame yet
-        }
-        local_read = ready;
-        atomic_store_explicit(&g_ring.read_idx, local_read, memory_order_release);
-
-        RenderPacket* p = &g_ring.packets[local_read];
-        VkCommandBuffer cmd = cmd_buffers[current_frame];
-
-        // 3. WSI Lifecycle
-        pfnWait(g_wsi.device, 1, &g_wsi.in_flight[current_frame], VK_TRUE, UINT64_MAX);
-
-        uint32_t img_idx;
-        VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX,
-                                  g_wsi.image_available[current_frame], VK_NULL_HANDLE, &img_idx);
-
-        if (res == VK_ERROR_OUT_OF_DATE_KHR) {
-            atomic_store_explicit(&g_engine.mailbox.window_resized, 1, memory_order_release);
-            SLEEP_MS(10);
-            continue;
-        }
-        pfnReset(g_wsi.device, 1, &g_wsi.in_flight[current_frame]);
-
-        // 4. Dynamic Swapchain Injection & Command Record
-        p->swapchain_image = g_wsi.swapchain_images[img_idx];
-        p->swapchain_view  = g_wsi.swapchain_views[img_idx];
-
-        vkResetCommandBuffer(cmd, 0);
-        vibe_record_commands(cmd, p, p->draw_queue, p->draw_count, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
-
-        // 5. Submit
-        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        VkSubmitInfo submitInfo = {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &g_wsi.image_available[current_frame],
-            .pWaitDstStageMask = &waitStage,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &cmd,
-            .signalSemaphoreCount = 1,
-            // CHANGE 1: Use img_idx to guarantee 1:1 mapping with the acquired image
-            .pSignalSemaphores = &g_wsi.render_finished[img_idx]
-        };
-        pfnSubmit(g_wsi.queue, 1, &submitInfo, g_wsi.in_flight[current_frame]);
-
-        // 6. Present
-        VkPresentInfoKHR presentInfo = {
-            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-            .waitSemaphoreCount = 1,
-            // CHANGE 2: Wait on the semaphore tied to this specific image
-            .pWaitSemaphores = &g_wsi.render_finished[img_idx],
-            .swapchainCount = 1,
-            .pSwapchains = &g_wsi.swapchain,
-            .pImageIndices = &img_idx
-        };
-        pfnPresent(g_wsi.queue, &presentInfo);
-
-        current_frame = (current_frame + 1) % 3;
-    }
-    vkDeviceWaitIdle(g_wsi.device);
-    vkFreeCommandBuffers(g_wsi.device, cmd_pool, 3, cmd_buffers);
-    vkDestroyCommandPool(g_wsi.device, cmd_pool, NULL);
-    printf("[C-CORE] Async Render Thread gracefully terminated and pool destroyed.\n");
-    return NULL;
-}
-#endif
 EXPORT void vibe_start_render_thread() {
     atomic_store_explicit(&g_render_thread_active, 1, memory_order_release);
     g_render_thread = vmath_thread_start(render_thread_loop, NULL);
