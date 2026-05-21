@@ -12,18 +12,18 @@ $ ./boot.exe
 [LUA] Window Surface Linked from Main Thread!
 [LUA] Hardware GPU Selected!
 [LUA] Logical Device Created!
-[DEBUG] Device Pointer in core: cdata<struct VkDevice_T *>: 0x017fe0bf8d38
+[DEBUG] Device Pointer in core: cdata<struct VkDevice_T *>: 0x01a3cbd0b908
 [MEMORY] ReBAR Supported! Streaming directly to VRAM.
 [MEMORY] Allocated & Mapped VRAM Buffer: MASTER_INDEX_BLOCK (45.78 MB)
-[MEMORY] Allocated Fast CPU RAM: px (45.78 MB)
-[MEMORY] Allocated Fast CPU RAM: py (45.78 MB)
-[MEMORY] Allocated Fast CPU RAM: pz (45.78 MB)
-[MEMORY] Allocated Fast CPU RAM: vx (45.78 MB)
-[MEMORY] Allocated Fast CPU RAM: vy (45.78 MB)
-[MEMORY] Allocated Fast CPU RAM: vz (45.78 MB)
-[MEMORY] Allocated Fast CPU RAM: seed (45.78 MB)
+[MEMORY] Allocated Fast CPU RAM: px (3.81 MB)
+[MEMORY] Allocated Fast CPU RAM: py (3.81 MB)
+[MEMORY] Allocated Fast CPU RAM: pz (3.81 MB)
+[MEMORY] Allocated Fast CPU RAM: vx (3.81 MB)
+[MEMORY] Allocated Fast CPU RAM: vy (3.81 MB)
+[MEMORY] Allocated Fast CPU RAM: vz (3.81 MB)
+[MEMORY] Allocated Fast CPU RAM: seed (3.81 MB)
 [MEMORY] ReBAR Supported! Streaming directly to VRAM.
-[MEMORY] Allocated & Mapped VRAM Buffer: MASTER_GPU_BLOCK (411.99 MB)
+[MEMORY] Allocated & Mapped VRAM Buffer: MASTER_GPU_BLOCK (34.33 MB)
 [SWAPCHAIN] Building the display chain...
 [SWAPCHAIN] Created successfully with 3 images!
 [DESCRIPTORS] Wiring Master VRAM Arena as a Unified SSBO...
@@ -36,6 +36,7 @@ $ ./boot.exe
 [LUA CO] Compiling Geometry...
 [C-CORE] Async Render Thread Online.
 [LUA CO] Entering Flattened Render Loop...
+[C-CORE] Native Fullscreen Engaged (1920x1200 @ 60Hz)
 [LUA CO] Window Stable. Initiating Vulkan Rebuild...
 [C-CORE] Async Render Thread gracefully terminated and pool destroyed.
 [C-CORE] Async Render Thread gracefully terminated for rebuild.
@@ -62,6 +63,11 @@ $ ./boot.exe
 [RENDERER] Forging Synchronization Primitives...
 [LUA CO] Rebuild Complete.
 [C-CORE] Async Render Thread Online.
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): THREADING ERROR : object of type VkFence is simultaneously used in current thread 9484 and thread 12260
+
 [LUA CO] Window Stable. Initiating Vulkan Rebuild...
 [C-CORE] Async Render Thread gracefully terminated and pool destroyed.
 [C-CORE] Async Render Thread gracefully terminated for rebuild.
@@ -75,32 +81,16 @@ $ ./boot.exe
 [RENDERER] Forging Synchronization Primitives...
 [LUA CO] Rebuild Complete.
 [C-CORE] Async Render Thread Online.
-[LUA CO] Window Stable. Initiating Vulkan Rebuild...
-[C-CORE] Async Render Thread gracefully terminated and pool destroyed.
-[C-CORE] Async Render Thread gracefully terminated for rebuild.
-[TEARDOWN] Destroying Graphics Pipeline & Depth Buffer...
-[TEARDOWN] Destroying Swapchain & Image Views...
-[TEARDOWN] Dismantling Renderer Sync Objects...
-[SWAPCHAIN] Building the display chain...
-[SWAPCHAIN] Created successfully with 3 images!
-[GRAPHICS] Building Reverse-Z Depth Buffer and Shader Modules...
-[GRAPHICS] Swarm Pipeline Successfully Compiled!
-[RENDERER] Forging Synchronization Primitives...
-[LUA CO] Rebuild Complete.
-[C-CORE] Async Render Thread Online.
-[LUA CO] Window Stable. Initiating Vulkan Rebuild...
-[C-CORE] Async Render Thread gracefully terminated and pool destroyed.
-[C-CORE] Async Render Thread gracefully terminated for rebuild.
-[TEARDOWN] Destroying Graphics Pipeline & Depth Buffer...
-[TEARDOWN] Destroying Swapchain & Image Views...
-[TEARDOWN] Dismantling Renderer Sync Objects...
-[SWAPCHAIN] Building the display chain...
-[SWAPCHAIN] Created successfully with 3 images!
-[GRAPHICS] Building Reverse-Z Depth Buffer and Shader Modules...
-[GRAPHICS] Swarm Pipeline Successfully Compiled!
-[RENDERER] Forging Synchronization Primitives...
-[LUA CO] Rebuild Complete.
-[C-CORE] Async Render Thread Online.
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkResetFences(): THREADING ERROR : object of type VkFence is simultaneously used in current thread 8896 and thread 12260
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): THREADING ERROR : object of type VkFence is simultaneously used in current thread 8896 and thread 12260
+
 [LUA CO] Window Stable. Initiating Vulkan Rebuild...
 [C-CORE] Async Render Thread gracefully terminated and pool destroyed.
 [C-CORE] Async Render Thread gracefully terminated for rebuild.
@@ -117,7 +107,7 @@ $ ./boot.exe
 [LUA IO] ESCAPE PRESSED. Executing Teardown...
 
 [C-CORE] Shutdown triggered. Waiting for Lua VM...
-[LUA CO] Render Loop Terminated. Frames: 2587
+[LUA CO] Render Loop Terminated. Frames: 4676
 [TEARDOWN] Terminating Async Render Thread...
 [C-CORE] Async Render Thread gracefully terminated and pool destroyed.
 [C-CORE] Async Render Thread gracefully terminated for rebuild.
@@ -130,6 +120,3 @@ $ ./boot.exe
 [TEARDOWN] Shutting down Vulkan Core...
 [LUA-OS-THREAD] VM Destroyed.
 [C-CORE] Clean Exit.
-
-AzureAD+HalimOmarZaghdoudi@DESKTOP-BD3FFTI MINGW64 ~/rebase
-$
