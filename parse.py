@@ -41,6 +41,8 @@ TARGET_FUNCTIONS = {
 
     # EXT Extended Dynamic States
     "vkCmdSetCullModeEXT",
+    "vkCmdSetFrontFaceEXT",
+    "vkCmdSetPrimitiveTopologyEXT",
     "vkCmdSetDepthTestEnableEXT",
     "vkCmdSetDepthWriteEnableEXT",
     "vkCmdSetDepthCompareOpEXT",

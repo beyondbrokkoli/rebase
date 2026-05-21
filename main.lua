@@ -101,16 +101,18 @@ ffi.cdef[[
         uint32_t first_instance;
         uint32_t _pad_cmd;
         uint8_t push_constants[128];
-        // --- 24 BYTES PADDING RECLAIMED ---
-        int16_t scissor_x;        // 2 bytes
-        int16_t scissor_y;        // 2 bytes
-        uint16_t scissor_w;       // 2 bytes
-        uint16_t scissor_h;       // 2 bytes
-        uint8_t cull_mode;        // 1 byte
-        uint8_t depth_test;       // 1 byte
-        uint8_t depth_write;      // 1 byte
-        uint8_t depth_compare_op; // 1 byte
-        uint8_t _reserved[12];    // 12 bytes
+
+        int16_t scissor_x;
+        int16_t scissor_y;
+        uint16_t scissor_w;
+        uint16_t scissor_h;
+        uint8_t cull_mode;
+        uint8_t depth_test;
+        uint8_t depth_write;
+        uint8_t depth_compare_op;
+        uint8_t front_face;          // NEW
+        uint8_t topology;            // NEW
+        uint8_t _reserved[10];       // PADDING ADJUSTED (12 -> 10)
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
@@ -151,6 +153,8 @@ ffi.cdef[[
         void* pfnBegin;
         void* pfnEnd;
         void* pfnSetCullMode;
+        void* pfnSetFrontFace;           // NEW
+        void* pfnSetPrimitiveTopology;   // NEW
         void* pfnSetDepthTestEnable;
         void* pfnSetDepthWriteEnable;
         void* pfnSetDepthCompareOp;
@@ -275,6 +279,8 @@ local function main()
     wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
 
     wsi.pfnSetCullMode = vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT")
+    wsi.pfnSetFrontFace = vk.vkGetDeviceProcAddr(device, "vkCmdSetFrontFaceEXT")
+    wsi.pfnSetPrimitiveTopology = vk.vkGetDeviceProcAddr(device, "vkCmdSetPrimitiveTopologyEXT")
     wsi.pfnSetDepthTestEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT")
     wsi.pfnSetDepthWriteEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT")
     wsi.pfnSetDepthCompareOp = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT")
@@ -409,6 +415,8 @@ local function main()
                     new_wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
 
                     new_wsi.pfnSetCullMode = vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT")
+                    new_wsi.pfnSetFrontFace = vk.vkGetDeviceProcAddr(device, "vkCmdSetFrontFaceEXT")
+                    new_wsi.pfnSetPrimitiveTopology = vk.vkGetDeviceProcAddr(device, "vkCmdSetPrimitiveTopologyEXT")
                     new_wsi.pfnSetDepthTestEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT")
                     new_wsi.pfnSetDepthWriteEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT")
                     new_wsi.pfnSetDepthCompareOp = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT")
@@ -544,6 +552,8 @@ local function main()
             cmd0.scissor_w = sc_state.extent.width
             cmd0.scissor_h = sc_state.extent.height
             cmd0.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
+            cmd0.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+            cmd0.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
             cmd0.depth_test = 1        -- VK_TRUE
             cmd0.depth_write = 1       -- VK_TRUE
             cmd0.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
@@ -570,6 +580,8 @@ local function main()
             cmd1.scissor_w = sc_state.extent.width
             cmd1.scissor_h = sc_state.extent.height
             cmd1.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
+            cmd1.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+            cmd1.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
             cmd1.depth_test = 1        -- VK_TRUE
             cmd1.depth_write = 1       -- VK_TRUE
             cmd1.depth_compare_op = 4  -- VK_COMPARE_OP_LESS

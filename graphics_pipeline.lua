@@ -177,19 +177,20 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local colorFormats = ffi.new("int32_t[1]", {colorFormat})
 
     -- Strict C-Array to prevent Lua table pointer shifting
-    local dynamicStates = ffi.new("VkDynamicState[6]")
+    local dynamicStates = ffi.new("VkDynamicState[8]")
     dynamicStates[0] = 0 -- VK_DYNAMIC_STATE_VIEWPORT
     dynamicStates[1] = 1 -- VK_DYNAMIC_STATE_SCISSOR
-    dynamicStates[2] = 1000267000 -- CULL_MODE (From EDS1)
-    dynamicStates[3] = 1000267006 -- DEPTH_TEST_ENABLE (From EDS2)
-    dynamicStates[4] = 1000267007 -- DEPTH_WRITE_ENABLE (From EDS2)
-    dynamicStates[5] = 1000267008 -- DEPTH_COMPARE_OP (From EDS2)
+    dynamicStates[2] = 1000267000 -- VK_DYNAMIC_STATE_CULL_MODE_EXT
+    dynamicStates[3] = 1000267001 -- VK_DYNAMIC_STATE_FRONT_FACE_EXT
+    dynamicStates[4] = 1000267002 -- VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT
+    dynamicStates[5] = 1000267006 -- VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT
+    dynamicStates[6] = 1000267007 -- VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT
+    dynamicStates[7] = 1000267008 -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
 
-    -- Explicit struct instantiation with ffi.fill guarantees perfect memory layout
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo")
     ffi.fill(dynamicStateInfo, ffi.sizeof(dynamicStateInfo))
     dynamicStateInfo.sType = 27
-    dynamicStateInfo.dynamicStateCount = 6
+    dynamicStateInfo.dynamicStateCount = 8
     dynamicStateInfo.pDynamicStates = dynamicStates
 
     local pipelineRenderingInfo = ffi.new("VkPipelineRenderingCreateInfo")

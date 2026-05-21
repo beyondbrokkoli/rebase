@@ -307,18 +307,19 @@ typedef struct {
     uint32_t first_instance;
     uint32_t _pad_cmd;
     uint8_t push_constants[128];
-    // --- 24 BYTES PADDING RECLAIMED ---
-    int16_t scissor_x;        // 2 bytes
-    int16_t scissor_y;        // 2 bytes
-    uint16_t scissor_w;       // 2 bytes
-    uint16_t scissor_h;       // 2 bytes
-    uint8_t cull_mode;        // 1 byte
-    uint8_t depth_test;       // 1 byte
-    uint8_t depth_write;      // 1 byte
-    uint8_t depth_compare_op; // 1 byte
-    uint8_t _reserved[12];    // 12 bytes
-} DrawCommand;
 
+    int16_t scissor_x;
+    int16_t scissor_y;
+    uint16_t scissor_w;
+    uint16_t scissor_h;
+    uint8_t cull_mode;
+    uint8_t depth_test;
+    uint8_t depth_write;
+    uint8_t depth_compare_op;
+    uint8_t front_face;          // NEW
+    uint8_t topology;            // NEW
+    uint8_t _reserved[10];       // PADDING ADJUSTED
+} DrawCommand;
 _Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
 
 // Packed is safe here because we manually aligned the pointer to offset 96.
@@ -373,6 +374,8 @@ typedef struct {
     void* pfnBegin;
     void* pfnEnd;
     void* pfnSetCullMode;
+    void* pfnSetFrontFace;           // NEW
+    void* pfnSetPrimitiveTopology;   // NEW
     void* pfnSetDepthTestEnable;
     void* pfnSetDepthWriteEnable;
     void* pfnSetDepthCompareOp;
@@ -502,6 +505,8 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
     vkCmdBindIndexBuffer(cmd, ibo, 0, VK_INDEX_TYPE_UINT32);
 
     PFN_vkCmdSetCullModeEXT vkCmdSetCullModeEXT = (PFN_vkCmdSetCullModeEXT)g_wsi.pfnSetCullMode;
+    PFN_vkCmdSetFrontFaceEXT vkCmdSetFrontFaceEXT = (PFN_vkCmdSetFrontFaceEXT)g_wsi.pfnSetFrontFace;
+    PFN_vkCmdSetPrimitiveTopologyEXT vkCmdSetPrimitiveTopologyEXT = (PFN_vkCmdSetPrimitiveTopologyEXT)g_wsi.pfnSetPrimitiveTopology;
     PFN_vkCmdSetDepthTestEnableEXT vkCmdSetDepthTestEnableEXT = (PFN_vkCmdSetDepthTestEnableEXT)g_wsi.pfnSetDepthTestEnable;
     PFN_vkCmdSetDepthWriteEnableEXT vkCmdSetDepthWriteEnableEXT = (PFN_vkCmdSetDepthWriteEnableEXT)g_wsi.pfnSetDepthWriteEnable;
     PFN_vkCmdSetDepthCompareOpEXT vkCmdSetDepthCompareOpEXT = (PFN_vkCmdSetDepthCompareOpEXT)g_wsi.pfnSetDepthCompareOp;
@@ -529,8 +534,11 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
             .offset = { (int32_t)draw->scissor_x, (int32_t)draw->scissor_y },
             .extent = { (uint32_t)draw->scissor_w, (uint32_t)draw->scissor_h }
         };
+
         vkCmdSetScissor(cmd, 0, 1, &scissor);
         vkCmdSetCullModeEXT(cmd, draw->cull_mode);
+        vkCmdSetFrontFaceEXT(cmd, draw->front_face);
+        vkCmdSetPrimitiveTopologyEXT(cmd, draw->topology);
         vkCmdSetDepthTestEnableEXT(cmd, draw->depth_test);
         vkCmdSetDepthWriteEnableEXT(cmd, draw->depth_write);
         vkCmdSetDepthCompareOpEXT(cmd, draw->depth_compare_op);
