@@ -10,7 +10,7 @@ local compute = require("compute_pipeline")
 local graphics = require("graphics_pipeline")
 local renderer = require("renderer")
 local os = require("os")
-local PCOUNT = 1000000
+local PCOUNT = 12000000
 -- HIGH-RESOLUTION KERNEL TIMER
 local get_time_hires
 
@@ -481,7 +481,6 @@ local function main()
             swarm_cmd.mouse_x = 0.0
             swarm_cmd.mouse_y = 5000.0
 
-            -- 1. ALWAYS Step the Simulation (Inputs are never dropped)
             vmath_lib.vmath_dispatch_swarm(
                 pc.particle_count,
                 c_px, c_py, c_pz,
@@ -491,115 +490,110 @@ local function main()
                 pc.dt, dt, 9.81, 1.0, 1.0
             )
 
-            -- 2. Ask C for permission to render
+            -- 1. Get the actual ring buffer index for the WSI synchronization
             local write_idx = ffi.C.vibe_ring_get_write_idx()
+            local frame_offset = write_idx * FRAME_FLOAT_COUNT
 
-            -- 3. The Decoupler: Only stream to VRAM and queue commands if the GPU is ready.
-            -- If it returns -1, we skip rendering and immediately loop back to poll inputs again.
-            if write_idx ~= -1 then
-                local frame_offset = write_idx * FRAME_FLOAT_COUNT
+            local gpu_px = master_ptr + frame_offset
+            local gpu_py = master_ptr + (frame_offset + padded_capacity)
+            local gpu_pz = master_ptr + (frame_offset + (padded_capacity * 2))
 
-                local gpu_px = master_ptr + frame_offset
-                local gpu_py = master_ptr + (frame_offset + padded_capacity)
-                local gpu_pz = master_ptr + (frame_offset + (padded_capacity * 2))
+            vmath_lib.vibe_stream_positions(
+                padded_capacity,
+                c_px, c_py, c_pz,
+                gpu_px, gpu_py, gpu_pz
+            )
 
-                vmath_lib.vibe_stream_positions(
-                    padded_capacity,
-                    c_px, c_py, c_pz,
-                    gpu_px, gpu_py, gpu_pz
-                )
+            -- 3. Tell the shaders where the positions live
+            pc.pos_x_idx = frame_offset
+            pc.pos_y_idx = frame_offset + padded_capacity
+            pc.pos_z_idx = frame_offset + (padded_capacity * 2)
+            pc.vel_x_idx = frame_offset + (padded_capacity * 3)
+            pc.vel_y_idx = frame_offset + (padded_capacity * 4)
+            pc.vel_z_idx = frame_offset + (padded_capacity * 5)
 
-                -- Tell the shaders where the positions live
-                pc.pos_x_idx = frame_offset
-                pc.pos_y_idx = frame_offset + padded_capacity
-                pc.pos_z_idx = frame_offset + (padded_capacity * 2)
-                pc.vel_x_idx = frame_offset + (padded_capacity * 3)
-                pc.vel_y_idx = frame_offset + (padded_capacity * 4)
-                pc.vel_z_idx = frame_offset + (padded_capacity * 5)
+            -- ==========================================
+            -- DATA-ORIENTED QUEUE POPULATION
+            -- ==========================================
+            local packet = ffi.C.vibe_ring_get_packet(write_idx)
+            local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
 
-                -- ==========================================
-                -- DATA-ORIENTED QUEUE POPULATION
-                -- ==========================================
-                local packet = ffi.C.vibe_ring_get_packet(write_idx)
-                local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
+            -- 1. Populate Compute & Global Context (KEEP THIS!)
+            -- C still needs to know the global state for the RenderPass
+            packet.comp_pipeline = ffi.cast("uint64_t", comp_state.pipeline)
+            packet.comp_layout = ffi.cast("uint64_t", comp_state.pipelineLayout)
+            packet.comp_desc_set = ffi.cast("uint64_t", desc_state.set0)
+            packet.gfx_layout = ffi.cast("uint64_t", gfx_state.pipelineLayout)
+            packet.vertex_buffer = ffi.cast("uint64_t", master_gpu_block)
+            packet.index_buffer = ffi.cast("uint64_t", master_index_block)
+            packet.depth_image = ffi.cast("uint64_t", gfx_state.depthImage)
+            packet.depth_view = ffi.cast("uint64_t", gfx_state.depthImageView)
+            packet.width = sc_state.extent.width
+            packet.height = sc_state.extent.height
+            ffi.copy(packet.comp_pc_payload, pc, 128)
 
-                -- 1. Populate Compute & Global Context (KEEP THIS!)
-                -- C still needs to know the global state for the RenderPass
-                packet.comp_pipeline = ffi.cast("uint64_t", comp_state.pipeline)
-                packet.comp_layout = ffi.cast("uint64_t", comp_state.pipelineLayout)
-                packet.comp_desc_set = ffi.cast("uint64_t", desc_state.set0)
-                packet.gfx_layout = ffi.cast("uint64_t", gfx_state.pipelineLayout)
-                packet.vertex_buffer = ffi.cast("uint64_t", master_gpu_block)
-                packet.index_buffer = ffi.cast("uint64_t", master_index_block)
-                packet.depth_image = ffi.cast("uint64_t", gfx_state.depthImage)
-                packet.depth_view = ffi.cast("uint64_t", gfx_state.depthImageView)
-                packet.width = sc_state.extent.width
-                packet.height = sc_state.extent.height
-                ffi.copy(packet.comp_pc_payload, pc, 128)
+            -- 2. Populate Draw Queue Data (DUAL DISPATCH)
+            local half_count = math.floor(pc.particle_count / 2)
 
-                -- 2. Populate Draw Queue Data (DUAL DISPATCH)
-                local half_count = math.floor(pc.particle_count / 2)
+            -- COMMAND 0: The Ice Shard Swarm (First Half)
+            local cmd0 = current_queue_ptr[0]
+            cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+            cmd0.index_count = 24
+            cmd0.first_index = 0
+            cmd0.vertex_offset = 0
+            cmd0.instance_count = half_count
+            cmd0.first_instance = 0
+            ffi.copy(cmd0.push_constants, pc, 128)
 
-                -- COMMAND 0: The Ice Shard Swarm (First Half)
-                local cmd0 = current_queue_ptr[0]
-                cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
-                cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-                cmd0.index_count = 24
-                cmd0.first_index = 0
-                cmd0.vertex_offset = 0
-                cmd0.instance_count = half_count
-                cmd0.first_instance = 0
-                ffi.copy(cmd0.push_constants, pc, 128)
+            -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
+            cmd0.scissor_x = 0
+            cmd0.scissor_y = 0
+            cmd0.scissor_w = sc_state.extent.width
+            cmd0.scissor_h = sc_state.extent.height
+            cmd0.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
+            cmd0.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+            cmd0.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+            cmd0.depth_test = 1        -- VK_TRUE
+            cmd0.depth_write = 1       -- VK_TRUE
+            cmd0.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
 
-                -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
-                cmd0.scissor_x = 0
-                cmd0.scissor_y = 0
-                cmd0.scissor_w = sc_state.extent.width
-                cmd0.scissor_h = sc_state.extent.height
-                cmd0.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
-                cmd0.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
-                cmd0.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-                cmd0.depth_test = 1        -- VK_TRUE
-                cmd0.depth_write = 1       -- VK_TRUE
-                cmd0.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
 
-                -- COMMAND 1: The Asteroid Cubes (Second Half)
-                local cmd1 = current_queue_ptr[1]
-                cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
-                cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-                cmd1.index_count = 36
-                cmd1.first_index = 24
-                cmd1.vertex_offset = 0
-                cmd1.instance_count = half_count
-                cmd1.first_instance = half_count
+            -- COMMAND 1: The Asteroid Cubes (Second Half)
+            local cmd1 = current_queue_ptr[1]
+            cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+            cmd1.index_count = 36
+            cmd1.first_index = 24
+            cmd1.vertex_offset = 0
+            cmd1.instance_count = half_count
+            cmd1.first_instance = half_count
 
-                local pc_cube = ffi.new("PushConstants")
-                ffi.copy(pc_cube, pc, 128)
-                pc_cube.target_state = 99
-                ffi.copy(cmd1.push_constants, pc_cube, 128)
+            local pc_cube = ffi.new("PushConstants")
+            ffi.copy(pc_cube, pc, 128)
+            pc_cube.target_state = 99
+            ffi.copy(cmd1.push_constants, pc_cube, 128)
 
-                -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
-                cmd1.scissor_x = 0
-                cmd1.scissor_y = 0
-                cmd1.scissor_w = sc_state.extent.width
-                cmd1.scissor_h = sc_state.extent.height
-                cmd1.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
-                cmd1.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
-                cmd1.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-                cmd1.depth_test = 1        -- VK_TRUE
-                cmd1.depth_write = 1       -- VK_TRUE
-                cmd1.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
+            -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
+            cmd1.scissor_x = 0
+            cmd1.scissor_y = 0
+            cmd1.scissor_w = sc_state.extent.width
+            cmd1.scissor_h = sc_state.extent.height
+            cmd1.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
+            cmd1.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+            cmd1.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+            cmd1.depth_test = 1        -- VK_TRUE
+            cmd1.depth_write = 1       -- VK_TRUE
+            cmd1.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
 
-                packet.draw_queue = current_queue_ptr
-                packet.draw_count = 2
+            -- 3. Bind the queue to the Ring Buffer packet
+            packet.draw_queue = current_queue_ptr
+            packet.draw_count = 2 -- Now telling C to loop twice!
 
-                -- Cross the boundary ONCE
-                ffi.C.vibe_ring_submit(write_idx)
+            -- 4. Cross the boundary ONCE
+            ffi.C.vibe_ring_submit(write_idx)
 
-                frame_count = frame_count + 1
-            else
-                sys_sleep(10)
-            end
+            frame_count = frame_count + 1
         end
         sys_sleep(10)
     end
