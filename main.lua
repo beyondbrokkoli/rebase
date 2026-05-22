@@ -353,6 +353,12 @@ local function main()
         idx_ptr[i - 1] = idx
     end
 
+    -- Render Mode States
+    local MODE_DUAL   = 0
+    local MODE_GEOM   = 1
+    local MODE_POINTS = 2
+    local active_render_mode = MODE_DUAL
+
     print("[LUA CO] Entering Flattened Render Loop...")
     local pc_ptr_type = ffi.typeof("PushConstants*")
     -- FLATTENED RENDER LOOP (No Yielding)
@@ -473,9 +479,20 @@ local function main()
                 space_was_pressed = false
             end
 
-            if ffi.C.vibe_get_last_key() == 256 then
+            -- The Input Router
+            local last_key = ffi.C.vibe_get_last_key()
+            if last_key == 256 then -- ESCAPE
                 print("[LUA IO] ESCAPE PRESSED. Executing Teardown...")
                 ffi.C.vibe_trigger_shutdown()
+            elseif last_key == 49 then -- '1' Key
+                active_render_mode = MODE_DUAL
+                print("[LUA] Switched to Dual Pipeline")
+            elseif last_key == 50 then -- '2' Key
+                active_render_mode = MODE_GEOM
+                print("[LUA] Switched to 100% Geometry")
+            elseif last_key == 51 then -- '3' Key
+                active_render_mode = MODE_POINTS
+                print("[LUA] Switched to 100% Point Cloud")
             end
 
             swarm_cmd.target_state = current_swarm_state - 1
@@ -594,10 +611,32 @@ local function main()
             cmd1.depth_write = 1
             cmd1.depth_compare_op = 4
 
-            -- 3. Bind the queue to the Ring Buffer packet
-            packet.draw_queue = current_queue_ptr
-            -- packet.draw_count = 2 -- Now telling C to loop twice!
-            packet.draw_count = 1 -- Now telling C to loop once!
+            -- [SURGICAL PATCH 4]: Dynamic Queue Routing
+            if active_render_mode == MODE_DUAL then
+                -- Split the load
+                cmd0.instance_count = half_count
+                cmd1.first_instance = half_count
+                cmd1.instance_count = half_count
+
+                packet.draw_queue = current_queue_ptr
+                packet.draw_count = 2
+
+            elseif active_render_mode == MODE_GEOM then
+                -- All particles to Geometry
+                cmd0.instance_count = pc.particle_count
+
+                packet.draw_queue = current_queue_ptr
+                packet.draw_count = 1
+
+            elseif active_render_mode == MODE_POINTS then
+                -- All particles to Points. Start reading from index 0.
+                cmd1.first_instance = 0
+                cmd1.instance_count = pc.particle_count
+
+                -- FFI POINTER ARITHMETIC: Skip cmd0 entirely!
+                packet.draw_queue = current_queue_ptr + 1
+                packet.draw_count = 1
+            end
 
             -- 4. Cross the boundary ONCE
             ffi.C.vibe_ring_submit(write_idx)

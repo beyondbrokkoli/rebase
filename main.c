@@ -193,6 +193,12 @@ void glfw_key_callback(GLFWwindow* window, int key, int scancode, int action, in
             printf("[C-CORE] Windowed Mode Restored\n");
         }
     }
+    // Explicit 1, 2, 3 Recognizer
+    if (action == GLFW_PRESS) {
+        if (key == GLFW_KEY_1 || key == GLFW_KEY_2 || key == GLFW_KEY_3) {
+            atomic_store_explicit(&g_engine.mailbox.last_key_pressed, key, memory_order_release);
+        }
+    }
 }
 
 VkDebugUtilsMessengerEXT g_debugMessenger = VK_NULL_HANDLE;
