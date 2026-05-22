@@ -300,64 +300,56 @@ typedef struct {
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
-// DATA-ORIENTED RENDER QUEUE STRUCTS
 typedef struct {
     uint64_t pipeline_id;
+    uint64_t layout_id;
     uint64_t descriptor_set;
-    uint32_t index_count;
-    uint32_t instance_count;
-    uint32_t first_index;
-    int32_t vertex_offset;
-    uint32_t first_instance;
+
+    uint32_t group_x;
+    uint32_t group_y;
+    uint32_t group_z;
+
     uint16_t pc_offset;
     uint16_t pc_size;
+
+    uint32_t barrier_src_stage;
+    uint32_t barrier_dst_stage;
+    uint32_t barrier_src_access;
+    uint32_t barrier_dst_access;
+
     uint8_t push_constants[128];
+    uint8_t _padding[8];
+} ComputeCommand;
 
-    int16_t scissor_x;
-    int16_t scissor_y;
-    uint16_t scissor_w;
-    uint16_t scissor_h;
-    uint8_t cull_mode;
-    uint8_t depth_test;
-    uint8_t depth_write;
-    uint8_t depth_compare_op;
-    uint8_t front_face;
-    uint8_t topology;
-    uint8_t _reserved[10];
-} DrawCommand;
-_Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
+_Static_assert(sizeof(ComputeCommand) == 192, "ComputeCommand MUST be exactly 192 bytes!");
 
-// Packed is safe here because we manually aligned the pointer to offset 96.
 typedef struct __attribute__((packed, aligned(64))) {
-    uint64_t comp_pipeline;    // 8 bytes
-    uint64_t comp_layout;      // 8 bytes
-    uint64_t comp_desc_set;    // 8 bytes
-    uint64_t gfx_layout;       // 8 bytes
-    uint64_t vertex_buffer;    // 8 bytes
-    uint64_t index_buffer;     // 8 bytes
-    uint64_t swapchain_image;  // 8 bytes
-    uint64_t swapchain_view;   // 8 bytes
-    uint64_t depth_image;      // 8 bytes
-    uint64_t depth_view;       // 8 bytes
-                               // --- Subtotal: 80 bytes
+    // 1. Compute Graph
+    ComputeCommand* comp_queue;
+    uint32_t comp_count;
+    uint32_t _pad_comp;
 
-    uint32_t width;            // 4 bytes
-    uint32_t height;           // 4 bytes
-    uint32_t draw_count;       // 4 bytes
-    uint32_t _pad_ptr;         // 4 bytes (CRITICAL: Aligns pointer to 96)
-                               // --- Subtotal: 96 bytes
+    // 2. Graphics Graph
+    DrawCommand* draw_queue;
+    uint32_t draw_count;
+    uint32_t _pad_draw;
 
-    DrawCommand* draw_queue;   // 8 bytes (Properly aligned to 8-byte boundary)
-                               // --- Subtotal: 104 bytes
+    // 3. Global Context
+    uint64_t gfx_layout;
+    uint64_t vertex_buffer;
+    uint64_t index_buffer;
+    uint64_t swapchain_image;
+    uint64_t swapchain_view;
+    uint64_t depth_image;
+    uint64_t depth_view;
+    uint32_t width;
+    uint32_t height;
 
-    uint8_t comp_pc_payload[128]; // 128 bytes
-                               // --- Subtotal: 232 bytes
-
-    uint8_t _padding[24];      // 24 bytes (Rounds out the 4th cache line)
-                               // --- TOTAL: 256 bytes
+    uint8_t _padding[32]; // Fixed: 96 bytes of fields + 32 padding = 128 bytes
 } RenderPacket;
 
-_Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 bytes!");
+_Static_assert(sizeof(RenderPacket) == 128, "RenderPacket MUST be exactly 128 bytes!");
+
 #define RING_SIZE 4
 #define LOAD(var) atomic_load_explicit(&(var), memory_order_acquire)
 #define STORE(var, val) atomic_store_explicit(&(var), (val), memory_order_release)
@@ -442,26 +434,39 @@ EXPORT void vx_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // 1. Compute Dispatch (Preserved)
-    if (p->comp_pipeline != 0) {
-        PushConstants* local_pc = (PushConstants*)p->comp_pc_payload;
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (VkPipeline)p->comp_pipeline);
-        VkDescriptorSet dset = (VkDescriptorSet)p->comp_desc_set;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (VkPipelineLayout)p->comp_layout, 0, 1, &dset, 0, NULL);
-        vkCmdPushConstants(cmd, (VkPipelineLayout)p->comp_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, p->comp_pc_payload);
+    // PHASE 1: ASYNC COMPUTE GRAPH
+    for (uint32_t i = 0; i < p->comp_count; i++) {
+        ComputeCommand* comp_cmd = &p->comp_queue[i];
 
-        uint32_t group_count = (local_pc->particle_count + 255) / 256;
-        vkCmdDispatch(cmd, group_count, 1, 1);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (VkPipeline)comp_cmd->pipeline_id);
 
-        VkMemoryBarrier compBarrier = {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &compBarrier, 0, NULL, 0, NULL);
+        VkDescriptorSet dset = (VkDescriptorSet)comp_cmd->descriptor_set;
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (VkPipelineLayout)comp_cmd->layout_id, 0, 1, &dset, 0, NULL);
+
+        // Push constants OR'd with VERTEX_BIT to safely cover the unified pipeline layout configuration
+        vkCmdPushConstants(cmd, (VkPipelineLayout)comp_cmd->layout_id,
+                           VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+                           comp_cmd->pc_offset, comp_cmd->pc_size, comp_cmd->push_constants + comp_cmd->pc_offset);
+
+        vkCmdDispatch(cmd, comp_cmd->group_x, comp_cmd->group_y, comp_cmd->group_z);
+
+        // Dynamic execution barrier injection
+        if (comp_cmd->barrier_src_stage != 0 && comp_cmd->barrier_dst_stage != 0) {
+            VkMemoryBarrier compBarrier = {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                .srcAccessMask = comp_cmd->barrier_src_access,
+                .dstAccessMask = comp_cmd->barrier_dst_access
+            };
+
+            vkCmdPipelineBarrier(
+                cmd,
+                comp_cmd->barrier_src_stage, comp_cmd->barrier_dst_stage,
+                0, 1, &compBarrier, 0, NULL, 0, NULL
+            );
+        }
     }
 
-    // 2. Setup Render Pass Barriers (Preserved)
+    // Phase 2: Setup Render Pass Barriers (Preserved)
     VkImageMemoryBarrier preBarriers[2] = {0};
     preBarriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     preBarriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
