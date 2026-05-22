@@ -355,7 +355,7 @@ _Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 by
 #define LOAD(var) atomic_load_explicit(&(var), memory_order_acquire)
 #define STORE(var, val) atomic_store_explicit(&(var), (val), memory_order_release)
 
-typedef struct {
+typedef struct __attribute__((aligned(64))){
     VkDevice device;
     VkQueue queue;
     VkSwapchainKHR swapchain;
@@ -381,7 +381,7 @@ typedef struct {
     // FFI-SYNC-PADDING: Prevents misalignment in Lua FFI memory layout.
     // Struct is exactly 416 bytes. 32 bytes padding snaps it to exactly 448 bytes (7 cache lines).
     uint64_t _padding[4];
-} alignas(64) RenderThreadInit;
+} RenderThreadInit;
 
 // FFI-CONTRACT: RenderPacket mapping
 typedef struct {
