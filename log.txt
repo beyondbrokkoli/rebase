@@ -1,3 +1,4 @@
+
 AzureAD+HalimOmarZaghdoudi@DESKTOP-BD3FFTI MINGW64 ~/rebase
 $ ./boot.exe
 [C-CORE] Booting Headless Worker...
@@ -12,7 +13,7 @@ $ ./boot.exe
 [LUA] Window Surface Linked from Main Thread!
 [LUA] Hardware GPU Selected!
 [LUA] Logical Device Created!
-[DEBUG] Device Pointer in core: cdata<struct VkDevice_T *>: 0x01ddc20276f8
+[DEBUG] Device Pointer in core: cdata<struct VkDevice_T *>: 0x02c6f3c9ead8
 [MEMORY] ReBAR Supported! Streaming directly to VRAM.
 [MEMORY] Allocated & Mapped VRAM Buffer: MASTER_INDEX_BLOCK (45.78 MB)
 [MEMORY] Allocated Fast CPU RAM: px (45.78 MB)
@@ -35,8 +36,8 @@ $ ./boot.exe
 [LUA CO] Compiling Geometry...
 [C-CORE] Async Render Thread Online.
 [LUA CO] Entering Flattened Render Loop...
-[C-CORE] Native Fullscreen Engaged (1680x1050 @ 60Hz)
 [LUA CO] Window Stable. Initiating Vulkan Rebuild...
+[C-CORE] Native Fullscreen Engaged (1680x1050 @ 60Hz)
 [C-CORE] Async Render Thread gracefully terminated and pool destroyed.
 [C-CORE] Async Render Thread gracefully terminated for rebuild.
 [TEARDOWN] Destroying Dual Graphics Pipelines & Depth Buffer...
@@ -46,70 +47,113 @@ $ ./boot.exe
 [SWAPCHAIN] Created successfully with 3 images!
 [GRAPHICS] Building Reverse-Z Depth Buffer and Shader Modules...
 [RENDERER] Forging Synchronization Primitives...
-[LUA CO] Rebuild Complete.
-[C-CORE] Async Render Thread Online.
-[LUA IO] ESCAPE PRESSED. Executing Teardown...
-
-[C-CORE] Shutdown triggered. Waiting for Lua VM...
-[LUA CO] Render Loop Terminated. Frames: 822
-[TEARDOWN] Terminating Async Render Thread...
-[C-CORE] Async Render Thread gracefully terminated and pool destroyed.
-[C-CORE] Async Render Thread gracefully terminated for rebuild.
-[TEARDOWN] Dismantling Renderer Sync Objects...
-[TEARDOWN] Destroying Dual Graphics Pipelines & Depth Buffer...
-[TEARDOWN] Destroying Compute Pipeline...
-[TEARDOWN] Deconstructing Descriptors...
-[TEARDOWN] Destroying Swapchain & Image Views...
-[TEARDOWN] Freeing VRAM Arenas...
-[TEARDOWN] Shutting down Vulkan Core...
-
-[VULKAN LAYER ENFORCER]
-SEVERITY: 4096
-MESSAGE: vkDestroyDevice(): Object Tracking - For VkDevice 0x1ddc20276f8, VkShaderModule 0x3f000000003f has not been destroyed.
-The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+[LUA CO] Rebuild Complete.[C-CORE] Async Render Thread Online.
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkDestroyDevice(): Object Tracking - For VkDevice 0x1ddc20276f8, VkShaderModule 0x410000000041 has not been destroyed.
-The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+MESSAGE: vkQueueSubmit(): pSubmits[0].pWaitSemaphores[0] queue (VkQueue 0x2c6f7f30088) is waiting on semaphore (VkSemaphore 0x490000000049) that has no way to be signaled.
+The Vulkan spec states: All elements of the pWaitSemaphores member of all elements of pSubmits created with a VkSemaphoreType of VK_SEMAPHORE_TYPE_BINARY must reference a semaphore signal operation that has been submitted for execution and any semaphore signal operations on which it depends must have also been submitted for execution (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pWaitSemaphores-03238)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkDestroyDevice(): Object Tracking - For VkDevice 0x1ddc20276f8, VkShaderModule 0x400000000040 has not been destroyed.
-The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+MESSAGE: vkQueueSubmit(): pSubmits[0].pSignalSemaphores[0] (VkSemaphore 0x480000000048) is being signaled by VkQueue 0x2c6f7f30088, but it may still be in use by VkSwapchainKHR 0x350000000035.
+Most recently acquired image indices: 0, 1, 2, 0, 1, 2, 0, [1].
+(Brackets mark the last use of VkSemaphore 0x480000000048 in a presentation operation.)
+Swapchain image 1 was presented but was not re-acquired, so VkSemaphore 0x480000000048 may still be in use.
+Vulkan insight: See https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html for details on swapchain semaphore reuse. Examples of possible approaches:
+   a) Use a separate semaphore per swapchain image. Index these semaphores using the index of the acquired image.
+   b) Consider the VK_KHR_swapchain_maintenance1 extension. It allows using a VkFence with the presentation operation.
+The Vulkan spec states: Each binary semaphore element of the pSignalSemaphores member of any element of pSubmits must be unsignaled when the semaphore signal operation it defines is executed on the device (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pSignalSemaphores-00067)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkDestroyDevice(): Object Tracking - For VkDevice 0x1ddc20276f8, VkShaderModule 0x170000000017 has not been destroyed.
-The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+MESSAGE: vkQueuePresentKHR(): pPresentInfo->pSwapchains[0] image at index 1 was not acquired from the swapchain.
+The Vulkan spec states: Each element of pImageIndices must be the index of a presentable image acquired from the swapchain specified by the corresponding element of the pSwapchains array, and the presented image subresource must be in the VK_IMAGE_LAYOUT_PRESENT_SRC_KHR or VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR layout at the time the operation is executed on a VkDevice (https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html#VUID-VkPresentInfoKHR-pImageIndices-01430)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkDestroyDevice(): Object Tracking - For VkDevice 0x1ddc20276f8, VkShaderModule 0x420000000042 has not been destroyed.
-The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+MESSAGE: vkAcquireNextImageKHR(): Semaphore must not have any pending operations.
+The Vulkan spec states: If semaphore is not VK_NULL_HANDLE, it must not have any uncompleted signal or wait operations pending (https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html#VUID-vkAcquireNextImageKHR-semaphore-01779)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkDestroyDevice(): Object Tracking - For VkDevice 0x1ddc20276f8, VkShaderModule 0x1a000000001a has not been destroyed.
-The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+MESSAGE: vkResetFences(): pFences[0] (VkFence 0x590000000059) is in use.
+The Vulkan spec states: Each element of pFences must not be currently associated with any queue command that has not yet completed execution on that queue (https://docs.vulkan.org/spec/latest/chapters/synchronization.html#VUID-vkResetFences-pFences-01123)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkDestroyDevice(): Object Tracking - For VkDevice 0x1ddc20276f8, VkShaderModule 0x180000000018 has not been destroyed.
-The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+MESSAGE: vkResetCommandBuffer(): (VkCommandBuffer 0x2c7216fe738) is in use.
+The Vulkan spec states: commandBuffer must not be in the pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkResetCommandBuffer-commandBuffer-00045)
 
 
 [VULKAN LAYER ENFORCER]
 SEVERITY: 4096
-MESSAGE: vkDestroyDevice(): Object Tracking - For VkDevice 0x1ddc20276f8, VkShaderModule 0x190000000019 has not been destroyed.
-The Vulkan spec states: All child objects created on device that can be destroyed or freed must have been destroyed or freed prior to destroying device (https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#VUID-vkDestroyDevice-device-05137)
+MESSAGE: vkBeginCommandBuffer(): on active VkCommandBuffer 0x2c7216fe738 before it has completed. You must check command buffer fence before this call.
+The Vulkan spec states: commandBuffer must not be in the recording or pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkBeginCommandBuffer-commandBuffer-00049)
 
-[LUA-OS-THREAD] VM Destroyed.
-[C-CORE] Clean Exit.
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): pSubmits[0].pCommandBuffers[0] VkCommandBuffer 0x2c7216fe738 is already in use and is not marked for simultaneous use.
+The Vulkan spec states: If any element of the pCommandBuffers member of any element of pSubmits was not recorded with the VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT, it must not be in the pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pCommandBuffers-00071)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): pSubmits[0].pWaitSemaphores[0] queue (VkQueue 0x2c6f7f30088) is waiting on semaphore (VkSemaphore 0x450000000045) that has no way to be signaled.
+The Vulkan spec states: All elements of the pWaitSemaphores member of all elements of pSubmits created with a VkSemaphoreType of VK_SEMAPHORE_TYPE_BINARY must reference a semaphore signal operation that has been submitted for execution and any semaphore signal operations on which it depends must have also been submitted for execution (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pWaitSemaphores-03238)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): pSubmits[0].pSignalSemaphores[0] (VkSemaphore 0x480000000048) is being signaled by VkQueue 0x2c6f7f30088, but it was previously signaled by VkQueue 0x2c6f7f30088 and has not since been waited on.
+The Vulkan spec states: Each binary semaphore element of the pSignalSemaphores member of any element of pSubmits must be unsignaled when the semaphore signal operation it defines is executed on the device (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pSignalSemaphores-00067)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueuePresentKHR(): pPresentInfo->pSwapchains[0] image at index 1 was not acquired from the swapchain.
+The Vulkan spec states: Each element of pImageIndices must be the index of a presentable image acquired from the swapchain specified by the corresponding element of the pSwapchains array, and the presented image subresource must be in the VK_IMAGE_LAYOUT_PRESENT_SRC_KHR or VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR layout at the time the operation is executed on a VkDevice (https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html#VUID-VkPresentInfoKHR-pImageIndices-01430)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkAcquireNextImageKHR(): Semaphore must not have any pending operations.
+The Vulkan spec states: If semaphore is not VK_NULL_HANDLE, it must not have any uncompleted signal or wait operations pending (https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html#VUID-vkAcquireNextImageKHR-semaphore-01779)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkResetFences(): pFences[0] (VkFence 0x5a000000005a) is in use.
+The Vulkan spec states: Each element of pFences must not be currently associated with any queue command that has not yet completed execution on that queue (https://docs.vulkan.org/spec/latest/chapters/synchronization.html#VUID-vkResetFences-pFences-01123)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkResetCommandBuffer(): (VkCommandBuffer 0x2c721819fa8) is in use.
+The Vulkan spec states: commandBuffer must not be in the pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkResetCommandBuffer-commandBuffer-00045)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkBeginCommandBuffer(): on active VkCommandBuffer 0x2c721819fa8 before it has completed. You must check command buffer fence before this call.
+The Vulkan spec states: commandBuffer must not be in the recording or pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkBeginCommandBuffer-commandBuffer-00049)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): pSubmits[0].pCommandBuffers[0] VkCommandBuffer 0x2c721819fa8 is already in use and is not marked for simultaneous use.
+The Vulkan spec states: If any element of the pCommandBuffers member of any element of pSubmits was not recorded with the VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT, it must not be in the pending state (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pCommandBuffers-00071)
+
+
+[VULKAN LAYER ENFORCER]
+SEVERITY: 4096
+MESSAGE: vkQueueSubmit(): pSubmits[0].pWaitSemaphores[0] queue (VkQueue 0x2c6f7f30088) is waiting on semaphore (VkSemaphore 0x470000000047) that has no way to be signaled.
+The Vulkan spec states: All elements of the pWaitSemaphores member of all elements of pSubmits created with a VkSemaphoreType of VK_SEMAPHORE_TYPE_BINARY must reference a semaphore signal operation that has been submitted for execution and any semaphore signal operations on which it depends must have also been submitted for execution (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pWaitSemaphores-03238)
 
