@@ -110,9 +110,9 @@ ffi.cdef[[
         uint8_t depth_test;
         uint8_t depth_write;
         uint8_t depth_compare_op;
-        uint8_t front_face;          // NEW
-        uint8_t topology;            // NEW
-        uint8_t _reserved[10];       // PADDING ADJUSTED (12 -> 10)
+        uint8_t front_face;
+        uint8_t topology;
+        uint8_t _reserved[10];
     } DrawCommand;
 
     typedef struct __attribute__((packed, aligned(64))) {
@@ -137,7 +137,7 @@ ffi.cdef[[
 
     // WSI Bridge
     typedef struct {
-        void* device;      // FFI doesn't need strict Vk Types here if passed as pointers
+        void* device;
         void* queue;
         void* swapchain;
         uint64_t swapchain_images[10];
@@ -153,11 +153,12 @@ ffi.cdef[[
         void* pfnBegin;
         void* pfnEnd;
         void* pfnSetCullMode;
-        void* pfnSetFrontFace;           // NEW
-        void* pfnSetPrimitiveTopology;   // NEW
+        void* pfnSetFrontFace;
+        void* pfnSetPrimitiveTopology;
         void* pfnSetDepthTestEnable;
         void* pfnSetDepthWriteEnable;
         void* pfnSetDepthCompareOp;
+        uint64_t _padding[4]; // ADDED: Syncs FFI memory layout with C alignas(64)
     } RenderThreadInit;
 
     // Subsystem Interfaces
@@ -198,7 +199,8 @@ local function main()
     ffi.C.vibe_set_glfw_cmd(1, 1280, 720)
 
     while ffi.C.vibe_get_vk_surface() == nil do
-        -- Spinlock waiting for async C core window creation
+        -- Waiting for async C core window creation
+        sys_sleep(10)
     end
 
     local surface_ptr = ffi.C.vibe_get_vk_surface()
@@ -227,7 +229,7 @@ local function main()
     }
 
     local FRAME_FLOAT_COUNT = padded_capacity * 3
-    local TOTAL_FLOAT_COUNT = FRAME_FLOAT_COUNT * 3
+    local TOTAL_FLOAT_COUNT = FRAME_FLOAT_COUNT * 4 -- UPDATED: 3 -> 4
     local UNIVERSE_SIZE_BYTES = TOTAL_FLOAT_COUNT * ffi.sizeof("float")
     local gpu_usage_flags = bit.bor(32, 128, 256)
 
@@ -298,7 +300,7 @@ local function main()
 
     -- Global Queue Allocation (Triple Buffered)
     local MAX_DRAW_COMMANDS = 1024
-    local render_queues = ffi.new("DrawCommand[?]", MAX_DRAW_COMMANDS * 3)
+    local render_queues = ffi.new("DrawCommand[?]", MAX_DRAW_COMMANDS * 4)
 
     local frame_count = 0
     local pc = ffi.new("PushConstants")
@@ -512,13 +514,11 @@ local function main()
             pc.vel_y_idx = frame_offset + (padded_capacity * 4)
             pc.vel_z_idx = frame_offset + (padded_capacity * 5)
 
-            -- ==========================================
             -- DATA-ORIENTED QUEUE POPULATION
-            -- ==========================================
             local packet = ffi.C.vibe_ring_get_packet(write_idx)
             local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
 
-            -- 1. Populate Compute & Global Context (KEEP THIS!)
+            -- 1. Populate Compute & Global Context
             -- C still needs to know the global state for the RenderPass
             packet.comp_pipeline = ffi.cast("uint64_t", comp_state.pipeline)
             packet.comp_layout = ffi.cast("uint64_t", comp_state.pipelineLayout)

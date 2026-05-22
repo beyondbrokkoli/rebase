@@ -45,7 +45,6 @@ static void vmath_thread_join(vmath_thread_t thread) {
 #define CMD_BOOT_WINDOW 1
 #define CMD_KILL_WINDOW 2
 
-// Fullscreen State Tracking
 static bool s_is_fullscreen = false;
 static int s_win_x = 0, s_win_y = 0;
 static int s_win_w = 1280, s_win_h = 720;
@@ -266,9 +265,8 @@ void glfw_framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 EXPORT int vibe_get_spacebar() {
     return atomic_load_explicit(&g_engine.mailbox.key_space, memory_order_acquire);
 }
-// ==========================================
+
 // MATHEMATICS & COMMAND STRUCTS
-// ==========================================
 typedef struct {
     float m[16];
 } mat4_t;
@@ -316,9 +314,9 @@ typedef struct {
     uint8_t depth_test;
     uint8_t depth_write;
     uint8_t depth_compare_op;
-    uint8_t front_face;          // NEW
-    uint8_t topology;            // NEW
-    uint8_t _reserved[10];       // PADDING ADJUSTED
+    uint8_t front_face;
+    uint8_t topology;
+    uint8_t _reserved[10];
 } DrawCommand;
 _Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
 
@@ -353,10 +351,10 @@ typedef struct __attribute__((packed, aligned(64))) {
 } RenderPacket;
 
 _Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 bytes!");
+#define RING_SIZE 4
+#define LOAD(var) atomic_load_explicit(&(var), memory_order_acquire)
+#define STORE(var, val) atomic_store_explicit(&(var), (val), memory_order_release)
 
-// ==========================================
-// C-ONLY SYNCHRONIZATION (HIDDEN FROM LUA)
-// ==========================================
 typedef struct {
     VkDevice device;
     VkQueue queue;
@@ -374,15 +372,20 @@ typedef struct {
     void* pfnBegin;
     void* pfnEnd;
     void* pfnSetCullMode;
-    void* pfnSetFrontFace;           // NEW
-    void* pfnSetPrimitiveTopology;   // NEW
+    void* pfnSetFrontFace;
+    void* pfnSetPrimitiveTopology;
     void* pfnSetDepthTestEnable;
     void* pfnSetDepthWriteEnable;
     void* pfnSetDepthCompareOp;
-} RenderThreadInit;
 
+    // FFI-SYNC-PADDING: Prevents misalignment in Lua FFI memory layout.
+    // Struct is exactly 416 bytes. 32 bytes padding snaps it to exactly 448 bytes (7 cache lines).
+    uint64_t _padding[4];
+} alignas(64) RenderThreadInit;
+
+// FFI-CONTRACT: RenderPacket mapping
 typedef struct {
-    alignas(64) RenderPacket packets[3];
+    alignas(64) RenderPacket packets[RING_SIZE];
     alignas(64) _Atomic int ready_idx;
     alignas(64) _Atomic int read_idx;
 } RenderRing;
@@ -405,18 +408,22 @@ EXPORT RenderPacket* vibe_ring_get_packet(int idx) {
 }
 
 EXPORT int vibe_ring_get_write_idx() {
-    int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
-    int read = atomic_load_explicit(&g_ring.read_idx, memory_order_acquire);
+    int ready = LOAD(g_ring.ready_idx);
+    int read  = LOAD(g_ring.read_idx);
 
-    // Mathematical selection of the unoccupied slot
-    if (ready != read && ready >= 0 && read >= 0) {
-        return 3 - (ready + read);
+    // Default to 0, otherwise take the next sequential buffer
+    int next = (ready == -1) ? 0 : (ready + 1) % RING_SIZE;
+
+    // Skip-Frame Guarantee: If we lap the GPU, step over the active read buffer
+    if (next == read) {
+        next = (next + 1) % RING_SIZE;
     }
-    return (ready == -1) ? 0 : (ready + 1) % 3;
+
+    return next;
 }
 
 EXPORT void vibe_ring_submit(int idx) {
-    atomic_store_explicit(&g_ring.ready_idx, idx, memory_order_release);
+    STORE(g_ring.ready_idx, idx);
 }
 
 EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
