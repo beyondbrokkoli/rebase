@@ -43,7 +43,11 @@ local function compile_engine(platform)
         os.execute("glslc geom.frag -o geom_frag.spv")
         os.execute("glslc points.vert -o points_vert.spv")
         os.execute("glslc points.frag -o points_frag.spv")
-        os.execute("glslc swarm.comp -o swarm_comp.spv")
+        os.execute("glslc clear.comp -o clear_comp.spv")
+        os.execute("glslc hash.comp -o hash_comp.spv")
+        os.execute("glslc scan.comp -o scan_comp.spv")
+        os.execute("glslc reorder.comp -o reorder_comp.spv")
+
 
         print("\n[2/3] Compiling libvx_math.so (AVX2 Worker Pool) ...")
         local linux_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -fPIC -pthread vx_math.c -o libvx_math.so -lm"
@@ -67,7 +71,11 @@ local function compile_engine(platform)
         os.execute(glslc .. " geom.frag -o geom_frag.spv")
         os.execute(glslc .. " points.vert -o points_vert.spv")
         os.execute(glslc .. " points.frag -o points_frag.spv")
-        os.execute(glslc .. " swarm.comp -o swarm_comp.spv")
+        os.execute(glslc .. " clear.comp -o clear_comp.spv")
+        os.execute(glslc .. " hash.comp -o hash_comp.spv")
+        os.execute(glslc .. " scan.comp -o scan_comp.spv")
+        os.execute(glslc .. " reorder.comp -o reorder_comp.spv")
+
 
         print("\n[2/4] Compiling vx_math.dll (AVX2 Worker Pool) ...")
         local win_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -pthread vx_math.c -o vx_math.dll -lm"

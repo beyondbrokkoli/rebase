@@ -1,0 +1,35 @@
+#version 460
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer MasterBuffer { uint data[]; } vram;
+
+layout(push_constant) uniform PushConstants {
+    mat4 viewProj;
+    uint pos_x_idx; uint pos_y_idx; uint pos_z_idx;
+    uint particle_count; float dt;
+    uint vel_x_idx; uint vel_y_idx; uint vel_z_idx;
+    uint target_state; uint push_active; uint pull_active;
+    float mouse_x; float mouse_y;
+    uint sorted_idx; uint cell_counters_idx; uint cell_offsets_idx;
+} pc;
+
+uint get_cell_id(vec3 pos) {
+    // 0.005 scales space so cells are 200 units wide
+    ivec3 p = ivec3(pos * 0.005); 
+    uint h = (uint(p.x) * 73856093U) ^ (uint(p.y) * 19349663U) ^ (uint(p.z) * 83492791U);
+    return h % 262144U;
+}
+
+void main() {
+    uint p_id = gl_GlobalInvocationID.x;
+    if (p_id >= pc.particle_count) return;
+    
+    vec3 pos = vec3(
+        uintBitsToFloat(vram.data[pc.pos_x_idx + p_id]),
+        uintBitsToFloat(vram.data[pc.pos_y_idx + p_id]),
+        uintBitsToFloat(vram.data[pc.pos_z_idx + p_id])
+    );
+    
+    uint cell = get_cell_id(pos);
+    atomicAdd(vram.data[pc.cell_counters_idx + cell], 1);
+}

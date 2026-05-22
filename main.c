@@ -278,25 +278,25 @@ typedef struct {
 } mat4_t;
 
 typedef struct {
-    mat4_t viewProj;           // Offset 0   (64 bytes)
-    uint32_t pos_x_idx;        // Offset 64  (4 bytes)
-    uint32_t pos_y_idx;        // Offset 68  (4 bytes)
-    uint32_t pos_z_idx;        // Offset 72  (4 bytes)
-    uint32_t particle_count;   // Offset 76  (4 bytes)
-    float dt;                  // Offset 80  (4 bytes)
-
-    // -- COMPUTATIONAL SWARM PAYLOAD --
-    uint32_t vel_x_idx;        // Offset 84  (4 bytes)
-    uint32_t vel_y_idx;        // Offset 88  (4 bytes)
-    uint32_t vel_z_idx;        // Offset 92  (4 bytes)
-    uint32_t target_state;     // Offset 96  (4 bytes)
-    uint32_t push_active;      // Offset 100 (4 bytes)
-    uint32_t pull_active;      // Offset 104 (4 bytes)
-    float mouse_x;             // Offset 108 (4 bytes)
-    float mouse_y;             // Offset 112 (4 bytes)
-
-    uint32_t _padding[3];      // Offset 116 (12 bytes)
-} PushConstants;               // TOTAL: 128 Bytes (Perfect)
+    mat4_t viewProj;
+    uint32_t pos_x_idx;
+    uint32_t pos_y_idx;
+    uint32_t pos_z_idx;
+    uint32_t particle_count;
+    float dt;
+    uint32_t vel_x_idx;
+    uint32_t vel_y_idx;
+    uint32_t vel_z_idx;
+    uint32_t target_state;
+    uint32_t push_active;
+    uint32_t pull_active;
+    float mouse_x;
+    float mouse_y;
+    // REPLACED: uint32_t _padding[3];
+    uint32_t sorted_idx;
+    uint32_t cell_counters_idx;
+    uint32_t cell_offsets_idx;
+} PushConstants;
 
 _Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
@@ -665,27 +665,31 @@ THREAD_FUNC render_thread_loop(void* arg) {
     while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) &&
            atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
 
+        // 1. Grab the latest frame from Lua
         int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
         if (ready == -1 || ready == local_read) {
-            SLEEP_MS(1); continue;
+            SLEEP_MS(1);
+            continue;
         }
-        local_read = ready; // We have a new frame to process
+        local_read = ready;
 
-        // 1. Wait for GPU to finish the pipeline slot we are about to reuse
+        // THE TEMPORAL SEAL: INSTANT LOCK
+        // Lock the slot immediately so Lua cannot lap the ring
+        // and overwrite it while we sleep on the Vulkan Fence!
+        atomic_fetch_or_explicit(&g_ring.locked_mask, (1 << local_read), memory_order_release);
+
+        // 2. Safe to sleep on the GPU WSI
         pfnWait(g_wsi.device, 1, &g_wsi.in_flight[current_frame], VK_TRUE, UINT64_MAX);
 
-        // 2. The GPU is done. UNLOCK the VRAM slot it was using.
+        // 3. UNLOCK: The GPU has finished drawing the oldest frame. Give the slot back to Lua.
         int finished_slot = active_ring_slots[current_frame];
-        if (finished_slot != -1) {
-            uint32_t current_mask = LOAD(g_ring.locked_mask);
-            STORE(g_ring.locked_mask, current_mask & ~(1 << finished_slot));
+        if (finished_slot != -1 && finished_slot != local_read) {
+            atomic_fetch_and_explicit(&g_ring.locked_mask, ~(1 << finished_slot), memory_order_release);
         }
 
-        // 3. LOCK the new VRAM slot so Lua can't overwrite it while it goes in flight
         active_ring_slots[current_frame] = local_read;
-        uint32_t new_mask = LOAD(g_ring.locked_mask);
-        STORE(g_ring.locked_mask, new_mask | (1 << local_read));
 
+        // 4. Safely read the sealed packet
         RenderPacket* p = &g_ring.packets[local_read];
         VkCommandBuffer cmd = cmd_buffers[current_frame];
 

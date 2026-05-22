@@ -79,7 +79,10 @@ ffi.cdef[[
         uint32_t pull_active;
         float mouse_x;
         float mouse_y;
-        uint32_t _padding[3];
+        // THE FUSE: Padding replaced with Index Offsets (12 bytes)
+        uint32_t sorted_idx;
+        uint32_t cell_counters_idx;
+        uint32_t cell_offsets_idx;
     } PushConstants;
 
     typedef struct {
@@ -149,7 +152,7 @@ ffi.cdef[[
         uint64_t depth_view;
         uint32_t width;
         uint32_t height;
-        uint8_t _padding[32];
+        uint8_t _padding[32]; // Perfect 128-byte alignment
     } RenderPacket;
 
     typedef struct {
@@ -244,11 +247,23 @@ local function main()
         seed = memory.AVX_Arrays["seed"]
     }
 
-    local FRAME_FLOAT_COUNT = padded_capacity * 3
-    local TOTAL_FLOAT_COUNT = FRAME_FLOAT_COUNT * 4 -- UPDATED: 3 -> 4
-    local UNIVERSE_SIZE_BYTES = TOTAL_FLOAT_COUNT * ffi.sizeof("float")
-    local gpu_usage_flags = bit.bor(32, 128, 256)
+    -- PHASE V: VRAM MEGA-BUFFER EXPANSION (Spatial Grid)
+    local NUM_CELLS = 262144 -- 64x64x64 Grid
 
+    local FRAME_FLOAT_COUNT = padded_capacity * 3
+    local FRAME_UINT_COUNT = padded_capacity        -- Sorted Indices
+    local FRAME_CELL_COUNT = NUM_CELLS * 2          -- Counters + Offsets
+
+    local FRAME_TOTAL_WORDS = FRAME_FLOAT_COUNT + FRAME_UINT_COUNT + FRAME_CELL_COUNT
+
+    -- Pad to 64-byte cache lines (16 words per cache line)
+    local ALIGN_WORDS = 16
+    FRAME_TOTAL_WORDS = math.ceil(FRAME_TOTAL_WORDS / ALIGN_WORDS) * ALIGN_WORDS
+
+    local TOTAL_WORDS = FRAME_TOTAL_WORDS * 4       -- 4 Ring Slots
+    local UNIVERSE_SIZE_BYTES = TOTAL_WORDS * 4     -- 4 Bytes per word
+
+    local gpu_usage_flags = bit.bor(32, 128, 256)   -- STORAGE_BUFFER
     memory.CreateHostVisibleBuffer("MASTER_GPU_BLOCK", "uint8_t", UNIVERSE_SIZE_BYTES, gpu_usage_flags, vk_state)
     local master_ptr = ffi.cast("float*", memory.Mapped["MASTER_GPU_BLOCK"])
 
@@ -534,9 +549,10 @@ local function main()
             local write_idx = ffi.C.vx_stream_acquire()
 
 
-            -- THE FIX: Only stream data and increment frame_count if we successfully acquired a slot
             if write_idx ~= -1 then
-                local frame_offset = write_idx * FRAME_FLOAT_COUNT
+                -- 1. Advance the unified frame offset pointer
+                local frame_offset = write_idx * FRAME_TOTAL_WORDS
+
                 local gpu_px = master_ptr + frame_offset
                 local gpu_py = master_ptr + (frame_offset + padded_capacity)
                 local gpu_pz = master_ptr + (frame_offset + (padded_capacity * 2))
@@ -547,43 +563,79 @@ local function main()
                     gpu_px, gpu_py, gpu_pz
                 )
 
-                -- ... [Keep your packet assignment and cmd0/cmd1 draw routing logic exactly as is] ...
-                -- 3. Tell the shaders where the positions live
+                -- 2. Configure Push Constant Offsets
                 pc.pos_x_idx = frame_offset
                 pc.pos_y_idx = frame_offset + padded_capacity
                 pc.pos_z_idx = frame_offset + (padded_capacity * 2)
-                pc.vel_x_idx = frame_offset + (padded_capacity * 3)
-                pc.vel_y_idx = frame_offset + (padded_capacity * 4)
-                pc.vel_z_idx = frame_offset + (padded_capacity * 5)
+
+                -- We don't stream velocity to the GPU, so zero these out
+                pc.vel_x_idx = 0
+                pc.vel_y_idx = 0
+                pc.vel_z_idx = 0
+
+                -- PHASE V: Bind the Grid Sorting Data (Directly after pos_z)
+                pc.sorted_idx = frame_offset + (padded_capacity * 3)
+                pc.cell_counters_idx = pc.sorted_idx + padded_capacity
+                pc.cell_offsets_idx = pc.cell_counters_idx + NUM_CELLS
 
                 local packet = ffi.C.vx_stream_packet(write_idx)
                 local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
                 local current_comp_queue = compute_queues + (write_idx * MAX_COMPUTE_COMMANDS)
 
-                -- 1. Configure the Compute Graph (Slot 0)
+                -- THE 4-PASS COMPUTE GRAPH (Zero Allocation)
                 packet.comp_queue = current_comp_queue
-                packet.comp_count = 1
+                packet.comp_count = 4
 
-                local comp0 = current_comp_queue[0]
-                comp0.pipeline_id = ffi.cast("uint64_t", comp_state.pipeline)
-                comp0.layout_id = ffi.cast("uint64_t", comp_state.pipelineLayout)
-                comp0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+                -- Common state for all passes
+                for c = 0, 3 do
+                    current_comp_queue[c].layout_id = ffi.cast("uint64_t", comp_state.pipelineLayout)
+                    current_comp_queue[c].descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+                    current_comp_queue[c].group_y = 1
+                    current_comp_queue[c].group_z = 1
+                    current_comp_queue[c].pc_offset = 0
+                    current_comp_queue[c].pc_size = 128
+                    ffi.copy(current_comp_queue[c].push_constants, pc, 128)
+                end
 
-                comp0.group_x = math.ceil(pc.particle_count / 256)
-                comp0.group_y = 1
-                comp0.group_z = 1
+                -- PASS 0: Clear Counters
+                local c0 = current_comp_queue[0]
+                c0.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_clear)
+                c0.group_x = math.ceil(NUM_CELLS / 256)
+                c0.barrier_src_stage = 2048 -- COMPUTE
+                c0.barrier_dst_stage = 2048 -- Wait before Hashing
+                c0.barrier_src_access = 64  -- WRITE
+                c0.barrier_dst_access = 96  -- READ/WRITE
 
-                comp0.pc_offset = 0
-                comp0.pc_size = 128
-                ffi.copy(comp0.push_constants, pc, 128)
+                -- PASS 1: Hash & Count
+                local c1 = current_comp_queue[1]
+                c1.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_hash)
+                c1.group_x = math.ceil(pc.particle_count / 256)
+                c1.barrier_src_stage = 2048
+                c1.barrier_dst_stage = 2048 -- Wait before Scan
+                c1.barrier_src_access = 64
+                c1.barrier_dst_access = 96
 
-                -- Replicate previous hardcoded barrier logic dynamically
-                comp0.barrier_src_stage = 2048 -- VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                comp0.barrier_dst_stage = 12   -- VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
-                comp0.barrier_src_access = 64  -- VK_ACCESS_SHADER_WRITE_BIT
-                comp0.barrier_dst_access = 36  -- VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT
+                -- PASS 2: Prefix Scan (Single Threaded Block)
+                local c2 = current_comp_queue[2]
+                c2.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_scan)
+                c2.group_x = 1
+                c2.barrier_src_stage = 2048
+                c2.barrier_dst_stage = 2048 -- Wait before Reorder
+                c2.barrier_src_access = 64
+                c2.barrier_dst_access = 96
 
-                -- 2. Configure Global Context
+                -- PASS 3: Reorder & Scatter
+                local c3 = current_comp_queue[3]
+                c3.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_reorder)
+                c3.group_x = math.ceil(pc.particle_count / 256)
+                c3.barrier_src_stage = 2048
+                c3.barrier_dst_stage = 12   -- VERTEX_SHADER
+                c3.barrier_src_access = 64  -- WRITE
+                c3.barrier_dst_access = 36  -- VERTEX_ATTRIBUTE_READ
+
+                -- ========================================================
+                -- GLOBAL GRAPHICS CONTEXT
+                -- ========================================================
                 packet.gfx_layout = ffi.cast("uint64_t", gfx_state.pipelineLayout)
                 packet.vertex_buffer = ffi.cast("uint64_t", master_gpu_block)
                 packet.index_buffer = ffi.cast("uint64_t", master_index_block)

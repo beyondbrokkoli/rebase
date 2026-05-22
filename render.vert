@@ -1,20 +1,19 @@
 #version 460
 
+// THE FIX: Switch from float to uint so we can read the Index Buffer natively
 layout(set = 0, binding = 0) readonly buffer MasterBuffer {
-    float data[];
+    uint data[];
 } vram;
 
 layout(push_constant) uniform PushConstants {
     mat4 viewProj;
-    uint pos_x_idx;
-    uint pos_y_idx;
-    uint pos_z_idx;
-    uint particle_count;
-    float dt;
-    uint vel_x_idx;
-    uint vel_y_idx;
-    uint vel_z_idx;
-    uint target_state;
+    uint pos_x_idx; uint pos_y_idx; uint pos_z_idx;
+    uint particle_count; float dt;
+    uint vel_x_idx; uint vel_y_idx; uint vel_z_idx;
+    uint target_state; uint push_active; uint pull_active;
+    float mouse_x; float mouse_y;
+    // THE FUSE: Added index offsets
+    uint sorted_idx; uint cell_counters_idx; uint cell_offsets_idx;
 } pc;
 
 layout(location = 0) out vec3 fragColor;
@@ -58,16 +57,23 @@ mat3 rotate3D(float x, float y, float z) {
 }
 
 void main() {
+    // 1. The GPU gives us our sequential draw index
     uint p_id = gl_InstanceIndex;
+    
+    // 2. We use it to look up the physically sorted Particle ID!
+    uint real_p_id = vram.data[pc.sorted_idx + p_id];
+
+    // 3. We pull the raw floats safely using uintBitsToFloat
     vec3 anchor = vec3(
-        vram.data[pc.pos_x_idx + p_id],
-        vram.data[pc.pos_y_idx + p_id],
-        vram.data[pc.pos_z_idx + p_id]
+        uintBitsToFloat(vram.data[pc.pos_x_idx + real_p_id]),
+        uintBitsToFloat(vram.data[pc.pos_y_idx + real_p_id]),
+        uintBitsToFloat(vram.data[pc.pos_z_idx + real_p_id])
     );
 
-    float h1 = hash(p_id);
-    float h2 = hash(p_id + 1337);
-    float h3 = hash(p_id + 42069);
+    // Make sure we feed real_p_id to the hash so colors don't flicker!
+    float h1 = hash(real_p_id);
+    float h2 = hash(real_p_id + 1337);
+    float h3 = hash(real_p_id + 42069);
 
     // ==============================================================
     // THE FIX: Unconditional assignment ensures the SPIR-V compiler 
