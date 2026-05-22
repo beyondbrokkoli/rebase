@@ -535,9 +535,9 @@ local function main()
             -- 2. Populate Draw Queue Data (DUAL DISPATCH)
             local half_count = math.floor(pc.particle_count / 2)
 
-            -- COMMAND 0: The Ice Shard Swarm (First Half)
+            -- COMMAND 0: The Geometric Swarm
             local cmd0 = current_queue_ptr[0]
-            cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline_geom)
             cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
             cmd0.index_count = 24
             cmd0.first_index = 0
@@ -545,23 +545,20 @@ local function main()
             cmd0.instance_count = half_count
             cmd0.first_instance = 0
             ffi.copy(cmd0.push_constants, pc, 128)
-
-            -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
             cmd0.scissor_x = 0
             cmd0.scissor_y = 0
             cmd0.scissor_w = sc_state.extent.width
             cmd0.scissor_h = sc_state.extent.height
-            cmd0.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
-            cmd0.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
-            cmd0.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-            cmd0.depth_test = 1        -- VK_TRUE
-            cmd0.depth_write = 1       -- VK_TRUE
-            cmd0.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
+            cmd0.cull_mode = 1
+            cmd0.front_face = 0
+            cmd0.topology = 3 -- Matches pipeline_geom (VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+            cmd0.depth_test = 1
+            cmd0.depth_write = 1
+            cmd0.depth_compare_op = 4
 
-
-            -- COMMAND 1: The Asteroid Cubes (Second Half)
+            -- COMMAND 1: The Point Cloud Nebula
             local cmd1 = current_queue_ptr[1]
-            cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline_points)
             cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
             cmd1.index_count = 36
             cmd1.first_index = 24
@@ -574,17 +571,16 @@ local function main()
             pc_cube.target_state = 99
             ffi.copy(cmd1.push_constants, pc_cube, 128)
 
-            -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
             cmd1.scissor_x = 0
             cmd1.scissor_y = 0
             cmd1.scissor_w = sc_state.extent.width
             cmd1.scissor_h = sc_state.extent.height
-            cmd1.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
-            cmd1.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
-            cmd1.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-            cmd1.depth_test = 1        -- VK_TRUE
-            cmd1.depth_write = 1       -- VK_TRUE
-            cmd1.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
+            cmd1.cull_mode = 0
+            cmd1.front_face = 0
+            cmd1.topology = 0 -- Matches pipeline_points (VK_PRIMITIVE_TOPOLOGY_POINT_LIST)
+            cmd1.depth_test = 1
+            cmd1.depth_write = 1
+            cmd1.depth_compare_op = 4
 
             -- 3. Bind the queue to the Ring Buffer packet
             packet.draw_queue = current_queue_ptr

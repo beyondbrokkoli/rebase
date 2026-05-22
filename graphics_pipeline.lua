@@ -122,12 +122,10 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     vertexInputInfo.vertexAttributeDescriptionCount = 0
     vertexInputInfo.pVertexAttributeDescriptions = nil
 
-    -- 6. FIXED FUNCTION STATES
     local inputAssembly = ffi.new("VkPipelineInputAssemblyStateCreateInfo")
     ffi.fill(inputAssembly, ffi.sizeof(inputAssembly))
     inputAssembly.sType = 20
-    -- inputAssembly.topology = 0 -- VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-    inputAssembly.topology = 3  -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+    -- Topology will be set per-pipeline below
 
     local viewportState = ffi.new("VkPipelineViewportStateCreateInfo")
     ffi.fill(viewportState, ffi.sizeof(viewportState))
@@ -138,10 +136,10 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local rasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo")
     ffi.fill(rasterizer, ffi.sizeof(rasterizer))
     rasterizer.sType = 23
-    rasterizer.polygonMode = 0 -- VK_POLYGON_MODE_FILL
+    rasterizer.polygonMode = 0
     rasterizer.lineWidth = 1.0
     rasterizer.cullMode = 1
-    rasterizer.frontFace = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+    rasterizer.frontFace = 0
 
     local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo")
     ffi.fill(multisampling, ffi.sizeof(multisampling))
@@ -151,21 +149,20 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local depthStencil = ffi.new("VkPipelineDepthStencilStateCreateInfo")
     ffi.fill(depthStencil, ffi.sizeof(depthStencil))
     depthStencil.sType = 25
-    depthStencil.depthTestEnable = 1 -- VK_TRUE
-    depthStencil.depthWriteEnable = 1 -- VK_TRUE
-    depthStencil.depthCompareOp = 4 -- VK_COMPARE_OP_GREATER (Reverse-Z!)
+    depthStencil.depthTestEnable = 1
+    depthStencil.depthWriteEnable = 1
+    depthStencil.depthCompareOp = 4
 
     local colorBlendAttachment = ffi.new("VkPipelineColorBlendAttachmentState[1]")
     ffi.fill(colorBlendAttachment, ffi.sizeof(colorBlendAttachment))
-    colorBlendAttachment[0].colorWriteMask = 15 -- R|G|B|A
-    -- colorBlendAttachment[0].blendEnable = 1 -- VK_TRUE
-    colorBlendAttachment[0].blendEnable = 0 -- VK_FALSE ?
-    colorBlendAttachment[0].srcColorBlendFactor = 6 -- SRC_ALPHA
-    colorBlendAttachment[0].dstColorBlendFactor = 1 -- ONE
-    colorBlendAttachment[0].colorBlendOp = 0 -- ADD
-    colorBlendAttachment[0].srcAlphaBlendFactor = 1 -- ONE
-    colorBlendAttachment[0].dstAlphaBlendFactor = 0 -- ZERO
-    colorBlendAttachment[0].alphaBlendOp = 0 -- ADD
+    colorBlendAttachment[0].colorWriteMask = 15
+    colorBlendAttachment[0].blendEnable = 0
+    colorBlendAttachment[0].srcColorBlendFactor = 6
+    colorBlendAttachment[0].dstColorBlendFactor = 1
+    colorBlendAttachment[0].colorBlendOp = 0
+    colorBlendAttachment[0].srcAlphaBlendFactor = 1
+    colorBlendAttachment[0].dstAlphaBlendFactor = 0
+    colorBlendAttachment[0].alphaBlendOp = 0
 
     local colorBlending = ffi.new("VkPipelineColorBlendStateCreateInfo")
     ffi.fill(colorBlending, ffi.sizeof(colorBlending))
@@ -173,19 +170,17 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     colorBlending.attachmentCount = 1
     colorBlending.pAttachments = colorBlendAttachment
 
-    -- 7. DYNAMIC RENDERING LINK & FINAL BUILD
     local colorFormats = ffi.new("int32_t[1]", {colorFormat})
 
-    -- Strict C-Array to prevent Lua table pointer shifting
     local dynamicStates = ffi.new("VkDynamicState[8]")
-    dynamicStates[0] = 0 -- VK_DYNAMIC_STATE_VIEWPORT
-    dynamicStates[1] = 1 -- VK_DYNAMIC_STATE_SCISSOR
-    dynamicStates[2] = 1000267000 -- VK_DYNAMIC_STATE_CULL_MODE_EXT
-    dynamicStates[3] = 1000267001 -- VK_DYNAMIC_STATE_FRONT_FACE_EXT
-    dynamicStates[4] = 1000267002 -- VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT
-    dynamicStates[5] = 1000267006 -- VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT
-    dynamicStates[6] = 1000267007 -- VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT
-    dynamicStates[7] = 1000267008 -- VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT
+    dynamicStates[0] = 0
+    dynamicStates[1] = 1
+    dynamicStates[2] = 1000267000
+    dynamicStates[3] = 1000267001
+    dynamicStates[4] = 1000267002
+    dynamicStates[5] = 1000267006
+    dynamicStates[6] = 1000267007
+    dynamicStates[7] = 1000267008
 
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo")
     ffi.fill(dynamicStateInfo, ffi.sizeof(dynamicStateInfo))
@@ -200,6 +195,7 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     pipelineRenderingInfo.pColorAttachmentFormats = colorFormats
     pipelineRenderingInfo.depthAttachmentFormat = 126
 
+    -- Base Pipeline Info
     local pipelineInfo = ffi.new("VkGraphicsPipelineCreateInfo[1]")
     ffi.fill(pipelineInfo, ffi.sizeof(pipelineInfo))
     pipelineInfo[0].sType = 28
@@ -216,31 +212,50 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     pipelineInfo[0].pDynamicState = dynamicStateInfo
     pipelineInfo[0].layout = pipelineLayout
 
-    local pPipeline = ffi.new("VkPipeline[1]")
-    assert(vk.vkCreateGraphicsPipelines(device, nil, 1, pipelineInfo, nil, pPipeline) == 0)
+    -- ==========================================
+    -- PIPELINE A: THE GEOMETRY SWARM (TRIANGLES)
+    -- ==========================================
+    inputAssembly.topology = 3 -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+    local pGeomPipeline = ffi.new("VkPipeline[1]")
+    assert(vk.vkCreateGraphicsPipelines(device, nil, 1, pipelineInfo, nil, pGeomPipeline) == 0)
 
-    print("[GRAPHICS] Swarm Pipeline Successfully Compiled!")
+    -- ==========================================
+    -- PIPELINE B: THE VOLUMETRIC NEBULA (POINTS)
+    -- ==========================================
+    inputAssembly.topology = 0 -- VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+    
+    local pointRasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo")
+    ffi.copy(pointRasterizer, rasterizer, ffi.sizeof(rasterizer))
+    pointRasterizer.cullMode = 0 -- VK_CULL_MODE_NONE (Disable backface culling for points)
+    pipelineInfo[0].pRasterizationState = pointRasterizer
+
+    local pPointsPipeline = ffi.new("VkPipeline[1]")
+    assert(vk.vkCreateGraphicsPipelines(device, nil, 1, pipelineInfo, nil, pPointsPipeline) == 0)
+
+    print("[GRAPHICS] Dual-Pipelines Successfully Compiled!")
+
     return {
         depthImage = depthImage,
         depthMemory = depthMemory,
         depthImageView = depthImageView,
         vertModule = pVertModule[0],
         fragModule = pFragModule[0],
-        pipeline = pPipeline[0],
-        pipelineLayout = pipelineLayout -- FATAL SEGFAULT FIX
+        pipelineLayout = pipelineLayout,
+        pipeline_geom = pGeomPipeline[0],
+        pipeline_points = pPointsPipeline[0] 
     }
 end
 
 function GraphicsPipeline.Destroy(vk, core_state, gfx_state)
-    print("[TEARDOWN] Destroying Graphics Pipeline & Depth Buffer...")
+    print("[TEARDOWN] Destroying Dual Graphics Pipelines & Depth Buffer...")
     if not gfx_state then return end
-
     local device = type(core_state) == "table" and core_state.device or core_state
-
-    vk.vkDestroyPipeline(device, gfx_state.pipeline, nil)
+    
+    vk.vkDestroyPipeline(device, gfx_state.pipeline_geom, nil)
+    vk.vkDestroyPipeline(device, gfx_state.pipeline_points, nil)
+    
     vk.vkDestroyShaderModule(device, gfx_state.vertModule, nil)
     vk.vkDestroyShaderModule(device, gfx_state.fragModule, nil)
-
     vk.vkDestroyImageView(device, gfx_state.depthImageView, nil)
     vk.vkDestroyImage(device, gfx_state.depthImage, nil)
     vk.vkFreeMemory(device, gfx_state.depthMemory, nil)
