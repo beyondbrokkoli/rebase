@@ -10,13 +10,14 @@ function Swapchain.Init(vk, core_state, width, height)
     vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(core_state.physicalDevice, core_state.surface, surfaceCaps)
 
     -- VULKAN EXTENT CLAMP: Override requested size with true driver capabilities
+    -- [PATCHED]: Clamped to 1x1 minimum to survive OS minimization/F11 0x0 extent crashes
     local actualExtent = surfaceCaps.currentExtent
     if actualExtent.width ~= 4294967295 then -- 0xFFFFFFFF
-        width = actualExtent.width
-        height = actualExtent.height
+        width = math.max(1, tonumber(actualExtent.width))
+        height = math.max(1, tonumber(actualExtent.height))
     else
-        width = math.max(surfaceCaps.minImageExtent.width, math.min(surfaceCaps.maxImageExtent.width, width))
-        height = math.max(surfaceCaps.minImageExtent.height, math.min(surfaceCaps.maxImageExtent.height, height))
+        width = math.max(1, math.max(tonumber(surfaceCaps.minImageExtent.width), math.min(tonumber(surfaceCaps.maxImageExtent.width), width)))
+        height = math.max(1, math.max(tonumber(surfaceCaps.minImageExtent.height), math.min(tonumber(surfaceCaps.maxImageExtent.height), height)))
     end
 
     local swapchainInfo = ffi.new("VkSwapchainCreateInfoKHR")
@@ -26,8 +27,8 @@ function Swapchain.Init(vk, core_state, width, height)
     swapchainInfo.minImageCount = surfaceCaps.minImageCount + 1
     swapchainInfo.imageFormat = 50
     swapchainInfo.imageColorSpace = 0
-    swapchainInfo.imageExtent.width = width     -- Now strictly validated
-    swapchainInfo.imageExtent.height = height   -- Now strictly validated
+    swapchainInfo.imageExtent.width = width     -- Now strictly validated & clamped
+    swapchainInfo.imageExtent.height = height   -- Now strictly validated & clamped
 
     swapchainInfo.imageArrayLayers = 1
     swapchainInfo.imageUsage = 16 -- VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
@@ -40,7 +41,6 @@ function Swapchain.Init(vk, core_state, width, height)
     local res = vk.vkCreateSwapchainKHR(core_state.device, swapchainInfo, nil, pSwapchain)
     assert(res == 0, "FATAL: Failed to create Swapchain! Error: " .. tonumber(res))
     local swapchain = pSwapchain[0]
-
 
     -- 3. Extract the Swapchain Images
     local pImageCount = ffi.new("uint32_t[1]")
@@ -81,6 +81,7 @@ function Swapchain.Init(vk, core_state, width, height)
         extent = { width = width, height = height }
     }
 end
+
 function Swapchain.Destroy(vk, core_state, sc_state)
     print("[TEARDOWN] Destroying Swapchain & Image Views...")
     if not sc_state then return end
@@ -95,4 +96,5 @@ function Swapchain.Destroy(vk, core_state, sc_state)
         vk.vkDestroySwapchainKHR(core_state.device, sc_state.handle, nil)
     end
 end
+
 return Swapchain
