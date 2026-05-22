@@ -543,7 +543,8 @@ local function main()
             cmd0.index_count = 24
             cmd0.first_index = 0
             cmd0.vertex_offset = 0
-            cmd0.instance_count = half_count
+            -- cmd0.instance_count = half_count
+            cmd0.instance_count = pc.particle_count
             cmd0.first_instance = 0
 
             -- [NEW] Define push constant range for CMD 0
@@ -595,7 +596,8 @@ local function main()
 
             -- 3. Bind the queue to the Ring Buffer packet
             packet.draw_queue = current_queue_ptr
-            packet.draw_count = 2 -- Now telling C to loop twice!
+            -- packet.draw_count = 2 -- Now telling C to loop twice!
+            packet.draw_count = 1 -- Now telling C to loop once!
 
             -- 4. Cross the boundary ONCE
             ffi.C.vibe_ring_submit(write_idx)
