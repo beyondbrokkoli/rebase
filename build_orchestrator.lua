@@ -45,10 +45,10 @@ local function compile_engine(platform)
         os.execute("glslc points.frag -o points_frag.spv")
         os.execute("glslc swarm.comp -o swarm_comp.spv")
 
-        print("\n[2/3] Compiling libvibemath.so (AVX2 Worker Pool) ...")
-        local linux_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -fPIC -pthread vibemath.c -o libvibemath.so -lm"
+        print("\n[2/3] Compiling libvx_math.so (AVX2 Worker Pool) ...")
+        local linux_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -fPIC -pthread vx_math.c -o libvx_math.so -lm"
         if not run_cmd(linux_build_vibemath) then
-            print("ERROR: vibemath compilation failed!")
+            print("ERROR: vx_math compilation failed!")
             os.exit(1)
         end
 
@@ -69,10 +69,10 @@ local function compile_engine(platform)
         os.execute(glslc .. " points.frag -o points_frag.spv")
         os.execute(glslc .. " swarm.comp -o swarm_comp.spv")
 
-        print("\n[2/4] Compiling vibemath.dll (AVX2 Worker Pool) ...")
-        local win_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -pthread vibemath.c -o vibemath.dll -lm"
+        print("\n[2/4] Compiling vx_math.dll (AVX2 Worker Pool) ...")
+        local win_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -pthread vx_math.c -o vx_math.dll -lm"
         if not run_cmd(win_build_vibemath) then
-            print("ERROR: vibemath.dll compilation failed!")
+            print("ERROR: vx_math.dll compilation failed!")
             os.exit(1)
         end
 

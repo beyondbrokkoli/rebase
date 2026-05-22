@@ -3,9 +3,9 @@ local bit = require("bit")
 require("vulkan_headers")
 
 ffi.cdef[[
-    const char** vibe_get_glfw_extensions(uint32_t* count);
-    void vibe_inject_validation_layers(void* instance);
-    void vibe_eject_validation_layers(void* instance);
+    const char** vx_sys_glfw_extensions(uint32_t* count);
+    void vx_sys_inject_validation(void* instance);
+    void vx_sys_eject_validation(void* instance);
 ]]
 
 local vk
@@ -34,7 +34,7 @@ function core.create_instance()
 
     -- 1. Ask C for GLFW Extensions natively!
     local pCount = ffi.new("uint32_t[1]")
-    local glfwExtensions = ffi.C.vibe_get_glfw_extensions(pCount)
+    local glfwExtensions = ffi.C.vx_sys_glfw_extensions(pCount)
     local exts_count = pCount[0]
 
     -- 1.5. Splice the arrays: GLFW Extensions + Debug Utils + Physical Device Props
@@ -51,7 +51,7 @@ function core.create_instance()
 
     local appInfo = ffi.new("VkApplicationInfo", {
         sType = 0, -- VK_STRUCTURE_TYPE_APPLICATION_INFO
-        pApplicationName = "VibeEngine Cooking Dish",
+        pApplicationName = "VX Engine Runtime",
         apiVersion = 4206592 -- VK_MAKE_API_VERSION(0, 1, 3, 0)
     })
     -- 2.5 Define the Validation Layers
@@ -75,7 +75,7 @@ function core.create_instance()
     print("[LUA] Vulkan Instance Created!")
 
     -- Optional Validation Layer injection (Requires it to exist in main.c)
-    ffi.C.vibe_inject_validation_layers(instance)
+    ffi.C.vx_sys_inject_validation(instance)
 
     -- Return the base state so main.lua can pass the instance to C and yield
     return {
@@ -214,7 +214,7 @@ function core.Destroy(vk_state)
 
     -- 3. Destroy the Instance Last
     if vk_state.instance ~= nil then
-        ffi.C.vibe_eject_validation_layers(vk_state.instance)
+        ffi.C.vx_sys_eject_validation(vk_state.instance)
         vk.vkDestroyInstance(vk_state.instance, nil)
     end
 end

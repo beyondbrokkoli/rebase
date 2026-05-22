@@ -44,21 +44,21 @@ end
 
 ffi.cdef[[
     // Core Engine Control
-    int vibe_get_is_running();
-    void vibe_trigger_shutdown();
-    void vibe_mark_lua_finished();
+    int vx_core_is_running();
+    void vx_core_shutdown();
+    void vx_core_mark_finished();
 
     // GLFW Bridge
-    const char** vibe_get_glfw_extensions(uint32_t* count);
-    void vibe_publish_vk_instance(void* instance);
-    void* vibe_get_vk_surface();
-    void vibe_set_glfw_cmd(int cmd, int w, int h);
-    int vibe_get_last_key();
-    uint32_t vibe_get_wasd();
-    float vibe_get_mouse_dx();
-    float vibe_get_mouse_dy();
-    int vibe_get_resize_flag();
-    void vibe_get_window_size(int* w, int* h);
+    const char** vx_sys_glfw_extensions(uint32_t* count);
+    void vx_sys_publish_instance(void* instance);
+    void* vx_sys_get_surface();
+    void vx_sys_set_cmd(int cmd, int w, int h);
+    int vx_input_last_key();
+    uint32_t vx_input_wasd();
+    float vx_input_mouse_dx();
+    float vx_input_mouse_dy();
+    int vx_sys_resize_flag();
+    void vx_sys_window_size(int* w, int* h);
 
     // Math & Types
     typedef struct { float m[16]; } mat4_t;
@@ -166,15 +166,15 @@ ffi.cdef[[
     void vmath_destroy_workers();
     void vmath_dispatch_swarm(int count, float* px, float* py, float* pz, float* vx, float* vy, float* vz, float* seed, const SwarmCommand* cmd, float time, float dt, float gravity, float blend_metal, float blend_paradox);
 
-    void vibe_stream_positions(int count, float* c_px, float* c_py, float* c_pz, float* g_px, float* g_py, float* g_pz);
-    int vibe_ring_get_write_idx();
-    RenderPacket* vibe_ring_get_packet(int idx);
-    void vibe_ring_submit(int idx);
-    void vibe_ring_init_wsi(RenderThreadInit* wsi);
-    void vibe_start_render_thread();
-    void vibe_kill_render_thread();
-    int vibe_get_mouse_btn(int btn);
-    int vibe_get_spacebar();
+    void vx_math_stream_pos(int count, float* c_px, float* c_py, float* c_pz, float* g_px, float* g_py, float* g_pz);
+    int vx_stream_acquire();
+    RenderPacket* vx_stream_packet(int idx);
+    void vx_stream_commit(int idx);
+    void vx_stream_init(RenderThreadInit* wsi);
+    void vx_thread_start();
+    void vx_thread_kill();
+    int vx_input_mouse_btn(int btn);
+    int vx_input_spacebar();
 
     void Sleep(uint32_t dwMilliseconds);
     int usleep(uint32_t usec);
@@ -188,22 +188,22 @@ local function sys_sleep(ms)
     end
 end
 
-local vmath_lib = ffi.load(jit.os == "Windows" and "vibemath.dll" or "./libvibemath.so")
+local vmath_lib = ffi.load(jit.os == "Windows" and "vx_math.dll" or "./libvx_math.so")
 
 local function main()
     print("[LUA IO] Booting Headless...")
     local vk_state = vulkan_core.create_instance()
-    ffi.C.vibe_publish_vk_instance(vk_state.instance)
+    ffi.C.vx_sys_publish_instance(vk_state.instance)
 
     print("[LUA IO] Ordering C-Core to Boot GLFW Window...")
-    ffi.C.vibe_set_glfw_cmd(1, 1280, 720)
+    ffi.C.vx_sys_set_cmd(1, 1280, 720)
 
-    while ffi.C.vibe_get_vk_surface() == nil do
+    while ffi.C.vx_sys_get_surface() == nil do
         -- Waiting for async C core window creation
         sys_sleep(10)
     end
 
-    local surface_ptr = ffi.C.vibe_get_vk_surface()
+    local surface_ptr = ffi.C.vx_sys_get_surface()
     vulkan_core.finalize_device_and_swapchain(vk_state, surface_ptr)
 
     local vk = vk_state.vk
@@ -250,7 +250,7 @@ local function main()
 
     local pWidth = ffi.new("int[1]")
     local pHeight = ffi.new("int[1]")
-    ffi.C.vibe_get_window_size(pWidth, pHeight)
+    ffi.C.vx_sys_window_size(pWidth, pHeight)
 
     local sc_state = swapchain_core.Init(vk, vk_state, pWidth[0], pHeight[0])
     local desc_state = descriptors.Init(vk, device, memory.Buffers["MASTER_GPU_BLOCK"])
@@ -287,8 +287,8 @@ local function main()
     wsi.pfnSetDepthWriteEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT")
     wsi.pfnSetDepthCompareOp = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT")
 
-    ffi.C.vibe_ring_init_wsi(wsi)
-    ffi.C.vibe_start_render_thread()
+    ffi.C.vx_stream_init(wsi)
+    ffi.C.vx_thread_start()
 
     -- HOT PATH OPTIMIZATIONS (Caching Locality)
     local master_gpu_block = memory.Buffers["MASTER_GPU_BLOCK"]
@@ -361,8 +361,8 @@ local function main()
     print("[LUA CO] Entering Flattened Render Loop...")
     local pc_ptr_type = ffi.typeof("PushConstants*")
     -- FLATTENED RENDER LOOP (No Yielding)
-    while ffi.C.vibe_get_is_running() == 1 do
-        if ffi.C.vibe_get_resize_flag() == 1 then
+    while ffi.C.vx_core_is_running() == 1 do
+        if ffi.C.vx_sys_resize_flag() == 1 then
             is_resizing = true
             last_resize_time = get_time_hires()
         end
@@ -370,12 +370,12 @@ local function main()
         if is_resizing then
             if (get_time_hires() - last_resize_time) > RESIZE_COOLDOWN then
                 print("[LUA CO] Window Stable. Initiating Vulkan Rebuild...")
-                ffi.C.vibe_kill_render_thread()
+                ffi.C.vx_thread_kill()
                 vk.vkDeviceWaitIdle(device)
 
                 local new_w = ffi.new("int[1]")
                 local new_h = ffi.new("int[1]")
-                ffi.C.vibe_get_window_size(new_w, new_h)
+                ffi.C.vx_sys_window_size(new_w, new_h)
 
                 if new_w[0] > 0 and new_h[0] > 0 then
                     graphics.Destroy(vk, vk_state, gfx_state)
@@ -429,8 +429,8 @@ local function main()
                     new_wsi.pfnSetDepthWriteEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT")
                     new_wsi.pfnSetDepthCompareOp = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT")
 
-                    ffi.C.vibe_ring_init_wsi(new_wsi)
-                    ffi.C.vibe_start_render_thread()
+                    ffi.C.vx_stream_init(new_wsi)
+                    ffi.C.vx_thread_start()
                 end
                 print("[LUA CO] Rebuild Complete.")
                 is_resizing = false
@@ -441,9 +441,9 @@ local function main()
             local dt = math.max(0.001, math.min(current_time - last_time, 0.033))
             last_time = current_time
 
-            local dx = ffi.C.vibe_get_mouse_dx()
-            local dy = ffi.C.vibe_get_mouse_dy()
-            local wasd = ffi.C.vibe_get_wasd()
+            local dx = ffi.C.vx_input_mouse_dx()
+            local dy = ffi.C.vx_input_mouse_dy()
+            local wasd = ffi.C.vx_input_wasd()
 
             cam_yaw = cam_yaw + (dx * sensitivity)
             cam_pitch = math.max(-1.5, math.min(1.5, cam_pitch + (dy * sensitivity)))
@@ -468,7 +468,7 @@ local function main()
             pc.dt = pc.dt + dt
             vmath.multiply_mat4(proj, view, pc.viewProj)
 
-            local space_is_down = (ffi.C.vibe_get_spacebar() == 1)
+            local space_is_down = (ffi.C.vx_input_spacebar() == 1)
             if space_is_down then
                 if not space_was_pressed then
                     current_swarm_state = (current_swarm_state % MAX_SWARM_STATES) + 1
@@ -479,10 +479,10 @@ local function main()
             end
 
             -- The Input Router
-            local last_key = ffi.C.vibe_get_last_key()
+            local last_key = ffi.C.vx_input_last_key()
             if last_key == 256 then -- ESCAPE
                 print("[LUA IO] ESCAPE PRESSED. Executing Teardown...")
-                ffi.C.vibe_trigger_shutdown()
+                ffi.C.vx_core_shutdown()
             elseif last_key == 294 then -- GLFW_KEY_F5
                 wants_hotswap = true    -- THE FIX: Flag it, don't execute immediately
             elseif last_key == 49 then -- '1' Key
@@ -497,8 +497,8 @@ local function main()
             end
 
             swarm_cmd.target_state = current_swarm_state - 1
-            swarm_cmd.push_active = ffi.C.vibe_get_mouse_btn(0)
-            swarm_cmd.pull_active = ffi.C.vibe_get_mouse_btn(1)
+            swarm_cmd.push_active = ffi.C.vx_input_mouse_btn(0)
+            swarm_cmd.pull_active = ffi.C.vx_input_mouse_btn(1)
             swarm_cmd.mouse_x = 0.0
             swarm_cmd.mouse_y = 5000.0
 
@@ -512,7 +512,7 @@ local function main()
             )
 
             -- 1. Get the actual ring buffer index for the WSI synchronization
-            local write_idx = ffi.C.vibe_ring_get_write_idx()
+            local write_idx = ffi.C.vx_stream_acquire()
 
 
             -- THE FIX: Only stream data and increment frame_count if we successfully acquired a slot
@@ -522,7 +522,7 @@ local function main()
                 local gpu_py = master_ptr + (frame_offset + padded_capacity)
                 local gpu_pz = master_ptr + (frame_offset + (padded_capacity * 2))
 
-                vmath_lib.vibe_stream_positions(
+                vmath_lib.vx_math_stream_pos(
                     padded_capacity,
                     c_px, c_py, c_pz,
                     gpu_px, gpu_py, gpu_pz
@@ -538,7 +538,7 @@ local function main()
                 pc.vel_z_idx = frame_offset + (padded_capacity * 5)
 
                 -- DATA-ORIENTED QUEUE POPULATION
-                local packet = ffi.C.vibe_ring_get_packet(write_idx)
+                local packet = ffi.C.vx_stream_packet(write_idx)
                 local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
 
                 -- 1. Populate Compute & Global Context
@@ -640,7 +640,7 @@ local function main()
                     wants_hotswap = false
                 end
 
-                ffi.C.vibe_ring_submit(write_idx)
+                ffi.C.vx_stream_commit(write_idx)
 
                 -- Pump the queue only on valid GPU frames
                 graphics.PumpDeletionQueue(vk, vk_state, frame_count)
@@ -655,7 +655,7 @@ local function main()
 
     -- TEARDOWN
     print("[TEARDOWN] Terminating Async Render Thread...")
-    ffi.C.vibe_kill_render_thread()
+    ffi.C.vx_thread_kill()
     vk.vkDeviceWaitIdle(vk_state.device)
     vmath_lib.vmath_destroy_workers()
 
@@ -675,4 +675,4 @@ local function main()
 end
 
 main()
-ffi.C.vibe_mark_lua_finished()
+ffi.C.vx_core_mark_finished()

@@ -78,20 +78,20 @@ typedef struct {
 
 static EngineState g_engine;
 
-EXPORT int vibe_get_is_running() { return atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_relaxed); }
-EXPORT void vibe_trigger_shutdown() { atomic_store_explicit(&g_engine.mailbox.is_running, 0, memory_order_release); }
-EXPORT void vibe_mark_lua_finished() { atomic_store_explicit(&g_engine.mailbox.lua_finished, 1, memory_order_release); }
-EXPORT const char** vibe_get_glfw_extensions(uint32_t* count) { return glfwGetRequiredInstanceExtensions(count); }
-EXPORT void vibe_publish_vk_instance(void* instance) { atomic_store_explicit(&g_engine.mailbox.vk_instance, instance, memory_order_release); }
-EXPORT void* vibe_get_vk_surface() { return atomic_load_explicit(&g_engine.mailbox.vk_surface, memory_order_acquire); }
+EXPORT int vx_core_is_running() { return atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_relaxed); }
+EXPORT void vx_core_shutdown() { atomic_store_explicit(&g_engine.mailbox.is_running, 0, memory_order_release); }
+EXPORT void vx_core_mark_finished() { atomic_store_explicit(&g_engine.mailbox.lua_finished, 1, memory_order_release); }
+EXPORT const char** vx_sys_glfw_extensions(uint32_t* count) { return glfwGetRequiredInstanceExtensions(count); }
+EXPORT void vx_sys_publish_instance(void* instance) { atomic_store_explicit(&g_engine.mailbox.vk_instance, instance, memory_order_release); }
+EXPORT void* vx_sys_get_surface() { return atomic_load_explicit(&g_engine.mailbox.vk_surface, memory_order_acquire); }
 
-EXPORT void vibe_set_glfw_cmd(int cmd, int w, int h) {
+EXPORT void vx_sys_set_cmd(int cmd, int w, int h) {
     atomic_store_explicit(&g_engine.mailbox.glfw_arg_w, w, memory_order_relaxed);
     atomic_store_explicit(&g_engine.mailbox.glfw_arg_h, h, memory_order_relaxed);
     atomic_store_explicit(&g_engine.mailbox.glfw_cmd, cmd, memory_order_release);
 }
 
-EXPORT int vibe_get_last_key() {
+EXPORT int vx_input_last_key() {
     return atomic_exchange_explicit(&g_engine.mailbox.last_key_pressed, 0, memory_order_acquire);
 }
 
@@ -138,7 +138,7 @@ void glfw_mouse_button_callback(GLFWwindow* window, int button, int action, int 
     }
 }
 
-EXPORT int vibe_get_mouse_btn(int btn) {
+EXPORT int vx_input_mouse_btn(int btn) {
     if (btn == 0) return atomic_load_explicit(&g_engine.mailbox.mouse_left, memory_order_acquire);
     if (btn == 1) return atomic_load_explicit(&g_engine.mailbox.mouse_right, memory_order_acquire);
     return 0;
@@ -218,7 +218,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(
     return VK_FALSE;
 }
 
-EXPORT void vibe_inject_validation_layers(void* instance_ptr) {
+EXPORT void vx_sys_inject_validation(void* instance_ptr) {
     VkInstance instance = (VkInstance)instance_ptr;
     VkDebugUtilsMessengerCreateInfoEXT createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -241,7 +241,7 @@ EXPORT void vibe_inject_validation_layers(void* instance_ptr) {
     }
 }
 
-EXPORT void vibe_eject_validation_layers(void* instance) {
+EXPORT void vx_sys_eject_validation(void* instance) {
     PFN_vkDestroyDebugUtilsMessengerEXT destroyFn =
         (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
             (VkInstance)instance,
@@ -253,11 +253,11 @@ EXPORT void vibe_eject_validation_layers(void* instance) {
     }
 }
 
-EXPORT uint32_t vibe_get_wasd() { return atomic_load_explicit(&g_engine.mailbox.wasd_mask, memory_order_acquire); }
-EXPORT float vibe_get_mouse_dx() { return atomic_exchange_explicit(&g_engine.mailbox.mouse_dx, 0.0f, memory_order_acquire); }
-EXPORT float vibe_get_mouse_dy() { return atomic_exchange_explicit(&g_engine.mailbox.mouse_dy, 0.0f, memory_order_acquire); }
-EXPORT int vibe_get_resize_flag() { return atomic_exchange_explicit(&g_engine.mailbox.window_resized, 0, memory_order_acquire); }
-EXPORT void vibe_get_window_size(int* w, int* h) {
+EXPORT uint32_t vx_input_wasd() { return atomic_load_explicit(&g_engine.mailbox.wasd_mask, memory_order_acquire); }
+EXPORT float vx_input_mouse_dx() { return atomic_exchange_explicit(&g_engine.mailbox.mouse_dx, 0.0f, memory_order_acquire); }
+EXPORT float vx_input_mouse_dy() { return atomic_exchange_explicit(&g_engine.mailbox.mouse_dy, 0.0f, memory_order_acquire); }
+EXPORT int vx_sys_resize_flag() { return atomic_exchange_explicit(&g_engine.mailbox.window_resized, 0, memory_order_acquire); }
+EXPORT void vx_sys_window_size(int* w, int* h) {
     *w = atomic_load_explicit(&g_engine.mailbox.win_w, memory_order_acquire);
     *h = atomic_load_explicit(&g_engine.mailbox.win_h, memory_order_acquire);
 }
@@ -268,7 +268,7 @@ void glfw_framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     atomic_store_explicit(&g_engine.mailbox.win_h, height, memory_order_release);
     atomic_store_explicit(&g_engine.mailbox.window_resized, 1, memory_order_release);
 }
-EXPORT int vibe_get_spacebar() {
+EXPORT int vx_input_spacebar() {
     return atomic_load_explicit(&g_engine.mailbox.key_space, memory_order_acquire);
 }
 
@@ -403,7 +403,7 @@ static RenderThreadInit g_wsi;
 static vmath_thread_t g_render_thread;
 static atomic_int g_render_thread_active = 0;
 
-EXPORT void vibe_ring_init_wsi(RenderThreadInit* wsi) {
+EXPORT void vx_stream_init(RenderThreadInit* wsi) {
     g_wsi = *wsi;
 
     // Purge stale packets and zero the lock mask across WSI rebuilds
@@ -411,11 +411,11 @@ EXPORT void vibe_ring_init_wsi(RenderThreadInit* wsi) {
     atomic_store_explicit(&g_ring.locked_mask, 0, memory_order_release);
 }
 
-EXPORT RenderPacket* vibe_ring_get_packet(int idx) {
+EXPORT RenderPacket* vx_stream_packet(int idx) {
     return &g_ring.packets[idx];
 }
 
-EXPORT int vibe_ring_get_write_idx() {
+EXPORT int vx_stream_acquire() {
     uint32_t mask = LOAD(g_ring.locked_mask);
     int ready = LOAD(g_ring.ready_idx);
 
@@ -430,7 +430,7 @@ EXPORT int vibe_ring_get_write_idx() {
     return -1;
 }
 
-EXPORT void vibe_ring_submit(int idx) {
+EXPORT void vx_stream_commit(int idx) {
     // FORCE HARDWARE MEMORY FLUSH:
     // Guarantees all previous ffi.copy and pointer assignments from Lua
     // are visible in RAM before the C-Core is allowed to read this slot.
@@ -438,7 +438,7 @@ EXPORT void vibe_ring_submit(int idx) {
     STORE(g_ring.ready_idx, idx);
 }
 
-EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
+EXPORT void vx_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand* queue, uint32_t count, PFN_vkCmdBeginRenderingKHR pfnBegin, PFN_vkCmdEndRenderingKHR pfnEnd) {
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
@@ -674,7 +674,7 @@ THREAD_FUNC render_thread_loop(void* arg) {
         p->swapchain_view  = g_wsi.swapchain_views[img_idx];
 
         vkResetCommandBuffer(cmd, 0);
-        vibe_record_commands(cmd, p, p->draw_queue, p->draw_count, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
+        vx_record_commands(cmd, p, p->draw_queue, p->draw_count, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
 
         // 5. Submit
         VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -712,17 +712,17 @@ THREAD_FUNC render_thread_loop(void* arg) {
     return NULL;
 }
 
-EXPORT void vibe_start_render_thread() {
+EXPORT void vx_thread_start() {
     atomic_store_explicit(&g_render_thread_active, 1, memory_order_release);
     g_render_thread = vmath_thread_start(render_thread_loop, NULL);
 }
 
-EXPORT void vibe_kill_render_thread() {
+EXPORT void vx_thread_kill() {
     atomic_store_explicit(&g_render_thread_active, 0, memory_order_release);
     vmath_thread_join(g_render_thread); // This physically pauses Lua until the C-thread exits cleanly!
     printf("[C-CORE] Async Render Thread gracefully terminated for rebuild.\n");
 }
-void vibe_init_mailbox() {
+void vx_init_mailbox() {
     atomic_init(&g_engine.mailbox.ready_index, 0);
     atomic_init(&g_engine.mailbox.is_running, 1);
     atomic_init(&g_engine.mailbox.lua_finished, 0);
@@ -746,7 +746,7 @@ int main(int argc, char** argv) {
     printf("[C-CORE] Booting Headless Worker...\n");
 
     if (!glfwInit()) return -1;
-    vibe_init_mailbox();
+    vx_init_mailbox();
 
     atomic_init(&g_engine.mailbox.glfw_cmd, CMD_IDLE);
     atomic_init(&g_engine.mailbox.last_key_pressed, 0);
@@ -761,7 +761,7 @@ int main(int argc, char** argv) {
 
     GLFWwindow* window = NULL;
 
-    while (vibe_get_is_running()) {
+    while (vx_core_is_running()) {
         if (window) glfwPollEvents();
 
         int cmd = atomic_exchange_explicit(&g_engine.mailbox.glfw_cmd, CMD_IDLE, memory_order_acquire);
@@ -772,7 +772,7 @@ int main(int argc, char** argv) {
 
             glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
             glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-            window = glfwCreateWindow(w, h, "VibeEngine Remote", NULL, NULL);
+            window = glfwCreateWindow(w, h, "VX Engine Remote", NULL, NULL);
             glfwSetWindowSizeLimits(window, 640, 360, GLFW_DONT_CARE, GLFW_DONT_CARE);
 
             // --- THE WINDOWS FOCUS OVERRIDE HACK ---

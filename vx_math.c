@@ -52,7 +52,7 @@
 #define M_PI 3.14159265358979323846f
 #endif
 // Blasts positions across the PCIe bus bypassing CPU Cache
-EXPORT void vibe_stream_positions(int count,
+EXPORT void vx_math_stream_pos(int count,
                                   const float* c_px, const float* c_py, const float* c_pz,
                                   float* g_px, float* g_py, float* g_pz)
 {
