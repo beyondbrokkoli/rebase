@@ -91,9 +91,9 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     local depthImageView = pDepthView[0]
 
     -- Load all 4 specialized shaders
-    local geomVertCode = ReadShaderFile("geom.spv")
+    local geomVertCode = ReadShaderFile("geom_vert.spv")
     local geomFragCode = ReadShaderFile("geom_frag.spv")
-    local pointVertCode = ReadShaderFile("points.spv")
+    local pointVertCode = ReadShaderFile("points_vert.spv")
     local pointFragCode = ReadShaderFile("points_frag.spv")
 
     local function createShaderModule(code)
