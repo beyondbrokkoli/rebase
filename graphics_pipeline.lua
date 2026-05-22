@@ -90,28 +90,31 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     assert(vk.vkCreateImageView(device, dViewInfo, nil, pDepthView) == 0)
     local depthImageView = pDepthView[0]
 
-    -- ========================================================
-    -- 4. Load Shader Modules
-    -- ========================================================
-    local vertCode = ReadShaderFile("render_vert.spv")
-    local fragCode = ReadShaderFile("render_frag.spv")
+    -- Load all 4 specialized shaders
+    local geomVertCode = ReadShaderFile("geom.spv")
+    local geomFragCode = ReadShaderFile("geom_frag.spv")
+    local pointVertCode = ReadShaderFile("points.spv")
+    local pointFragCode = ReadShaderFile("points_frag.spv")
 
-    local vertInfo = ffi.new("VkShaderModuleCreateInfo", {
-        sType = 16, codeSize = string.len(vertCode), pCode = ffi.cast("const uint32_t*", vertCode)
-    })
-    local fragInfo = ffi.new("VkShaderModuleCreateInfo", {
-        sType = 16, codeSize = string.len(fragCode), pCode = ffi.cast("const uint32_t*", fragCode)
-    })
+    local function createShaderModule(code)
+        local info = ffi.new("VkShaderModuleCreateInfo", { sType = 16, codeSize = string.len(code), pCode = ffi.cast("const uint32_t*", code) })
+        local pMod = ffi.new("VkShaderModule[1]")
+        assert(vk.vkCreateShaderModule(device, info, nil, pMod) == 0)
+        return pMod[0]
+    end
 
-    local pVertModule = ffi.new("VkShaderModule[1]")
-    local pFragModule = ffi.new("VkShaderModule[1]")
+    local geomVertMod = createShaderModule(geomVertCode)
+    local geomFragMod = createShaderModule(geomFragCode)
+    local pointVertMod = createShaderModule(pointVertCode)
+    local pointFragMod = createShaderModule(pointFragCode)
 
-    assert(vk.vkCreateShaderModule(device, vertInfo, nil, pVertModule) == 0)
-    assert(vk.vkCreateShaderModule(device, fragInfo, nil, pFragModule) == 0)
+    local geomStages = ffi.new("VkPipelineShaderStageCreateInfo[2]")
+    geomStages[0].sType = 18; geomStages[0].stage = 1; geomStages[0].module = geomVertMod; geomStages[0].pName = "main"
+    geomStages[1].sType = 18; geomStages[1].stage = 16; geomStages[1].module = geomFragMod; geomStages[1].pName = "main"
 
-    local shaderStages = ffi.new("VkPipelineShaderStageCreateInfo[2]")
-    shaderStages[0].sType = 18; shaderStages[0].stage = 1; shaderStages[0].module = pVertModule[0]; shaderStages[0].pName = "main"
-    shaderStages[1].sType = 18; shaderStages[1].stage = 16; shaderStages[1].module = pFragModule[0]; shaderStages[1].pName = "main"
+    local pointStages = ffi.new("VkPipelineShaderStageCreateInfo[2]")
+    pointStages[0].sType = 18; pointStages[0].stage = 1; pointStages[0].module = pointVertMod; pointStages[0].pName = "main"
+    pointStages[1].sType = 18; pointStages[1].stage = 16; pointStages[1].module = pointFragMod; pointStages[1].pName = "main"
 
     -- 0 Attributes, 0 Bindings! The Shader handles the geometry now.
     local vertexInputInfo = ffi.new("VkPipelineVertexInputStateCreateInfo")
@@ -212,37 +215,34 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
     pipelineInfo[0].pDynamicState = dynamicStateInfo
     pipelineInfo[0].layout = pipelineLayout
 
-    -- ==========================================
-    -- PIPELINE A: THE GEOMETRY SWARM (TRIANGLES)
-    -- ==========================================
-    inputAssembly.topology = 3 -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+    -- PIPELINE A: THE GEOMETRY SWARM
+    pipelineInfo[0].pStages = geomStages
+    inputAssembly.topology = 3 -- TRIANGLE_LIST
     local pGeomPipeline = ffi.new("VkPipeline[1]")
     assert(vk.vkCreateGraphicsPipelines(device, nil, 1, pipelineInfo, nil, pGeomPipeline) == 0)
 
-    -- ==========================================
-    -- PIPELINE B: THE VOLUMETRIC NEBULA (POINTS)
-    -- ==========================================
-    inputAssembly.topology = 0 -- VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-    
+    -- PIPELINE B: THE VOLUMETRIC NEBULA
+    pipelineInfo[0].pStages = pointStages
+    inputAssembly.topology = 0 -- POINT_LIST
+
     local pointRasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo")
     ffi.copy(pointRasterizer, rasterizer, ffi.sizeof(rasterizer))
-    pointRasterizer.cullMode = 0 -- VK_CULL_MODE_NONE (Disable backface culling for points)
+    pointRasterizer.cullMode = 0 -- No culling for points
     pipelineInfo[0].pRasterizationState = pointRasterizer
 
     local pPointsPipeline = ffi.new("VkPipeline[1]")
     assert(vk.vkCreateGraphicsPipelines(device, nil, 1, pipelineInfo, nil, pPointsPipeline) == 0)
 
-    print("[GRAPHICS] Dual-Pipelines Successfully Compiled!")
-
     return {
         depthImage = depthImage,
         depthMemory = depthMemory,
         depthImageView = depthImageView,
-        vertModule = pVertModule[0],
-        fragModule = pFragModule[0],
+        -- Export all 4 modules so they can be destroyed properly
+        gVert = geomVertMod, gFrag = geomFragMod,
+        pVert = pointVertMod, pFrag = pointFragMod,
         pipelineLayout = pipelineLayout,
         pipeline_geom = pGeomPipeline[0],
-        pipeline_points = pPointsPipeline[0] 
+        pipeline_points = pPointsPipeline[0]
     }
 end
 
@@ -250,12 +250,14 @@ function GraphicsPipeline.Destroy(vk, core_state, gfx_state)
     print("[TEARDOWN] Destroying Dual Graphics Pipelines & Depth Buffer...")
     if not gfx_state then return end
     local device = type(core_state) == "table" and core_state.device or core_state
-    
+
     vk.vkDestroyPipeline(device, gfx_state.pipeline_geom, nil)
     vk.vkDestroyPipeline(device, gfx_state.pipeline_points, nil)
-    
-    vk.vkDestroyShaderModule(device, gfx_state.vertModule, nil)
-    vk.vkDestroyShaderModule(device, gfx_state.fragModule, nil)
+
+    vk.vkDestroyShaderModule(device, gfx_state.geomVertMod, nil)
+    vk.vkDestroyShaderModule(device, gfx_state.geomFragMod, nil)
+    vk.vkDestroyShaderModule(device, gfx_state.pointVertMod, nil)
+    vk.vkDestroyShaderModule(device, gfx_state.pointFragMod, nil)
     vk.vkDestroyImageView(device, gfx_state.depthImageView, nil)
     vk.vkDestroyImage(device, gfx_state.depthImage, nil)
     vk.vkFreeMemory(device, gfx_state.depthMemory, nil)
