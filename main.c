@@ -303,7 +303,8 @@ typedef struct {
     uint32_t first_index;
     int32_t vertex_offset;
     uint32_t first_instance;
-    uint32_t _pad_cmd;
+    uint16_t pc_offset;
+    uint16_t pc_size;
     uint8_t push_constants[128];
 
     int16_t scissor_x;
@@ -550,7 +551,15 @@ EXPORT void vibe_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawComma
         vkCmdSetDepthWriteEnableEXT(cmd, draw->depth_write);
         vkCmdSetDepthCompareOpEXT(cmd, draw->depth_compare_op);
 
-        vkCmdPushConstants(cmd, (VkPipelineLayout)p->gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, 128, draw->push_constants);
+        // [SURGICAL PATCH: PARTIAL PUSH CONSTANTS]
+        vkCmdPushConstants(
+            cmd,
+            (VkPipelineLayout)p->gfx_layout,
+            VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+            draw->pc_offset,
+            draw->pc_size,
+            draw->push_constants + draw->pc_offset
+        );
 
         vkCmdDrawIndexed(cmd,
             draw->index_count,

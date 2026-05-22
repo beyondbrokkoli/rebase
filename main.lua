@@ -99,7 +99,8 @@ ffi.cdef[[
         uint32_t first_index;
         int32_t vertex_offset;
         uint32_t first_instance;
-        uint32_t _pad_cmd;
+        uint16_t pc_offset;
+        uint16_t pc_size;
         uint8_t push_constants[128];
 
         int16_t scissor_x;
@@ -353,7 +354,7 @@ local function main()
     end
 
     print("[LUA CO] Entering Flattened Render Loop...")
-
+    local pc_ptr_type = ffi.typeof("PushConstants*")
     -- FLATTENED RENDER LOOP (No Yielding)
     while ffi.C.vibe_get_is_running() == 1 do
         if ffi.C.vibe_get_resize_flag() == 1 then
@@ -535,7 +536,7 @@ local function main()
             -- 2. Populate Draw Queue Data (DUAL DISPATCH)
             local half_count = math.floor(pc.particle_count / 2)
 
-            -- COMMAND 0: The Geometric Swarm
+            -- COMMAND 0: The Geometric Swarm (FULL PUSH)
             local cmd0 = current_queue_ptr[0]
             cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline_geom)
             cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
@@ -544,7 +545,12 @@ local function main()
             cmd0.vertex_offset = 0
             cmd0.instance_count = half_count
             cmd0.first_instance = 0
+
+            -- [NEW] Define push constant range for CMD 0
+            cmd0.pc_offset = 0
+            cmd0.pc_size = 128
             ffi.copy(cmd0.push_constants, pc, 128)
+
             cmd0.scissor_x = 0
             cmd0.scissor_y = 0
             cmd0.scissor_w = sc_state.extent.width
@@ -556,21 +562,25 @@ local function main()
             cmd0.depth_write = 1
             cmd0.depth_compare_op = 4
 
-            -- COMMAND 1: The Point Cloud Nebula
+            -- ==========================================
+            -- COMMAND 1: The Point Cloud Nebula (PARTIAL PUSH)
+            -- ==========================================
             local cmd1 = current_queue_ptr[1]
             cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline_points)
             cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-
             cmd1.index_count = 1        -- 1 vertex per point particle
             cmd1.first_index = 0        -- Just read index 0 (value doesn't matter since gl_VertexIndex is ignored)
             cmd1.vertex_offset = 0
             cmd1.instance_count = half_count
             cmd1.first_instance = half_count
 
-            local pc_cube = ffi.new("PushConstants")
-            ffi.copy(pc_cube, pc, 128)
-            pc_cube.target_state = 99
-            ffi.copy(cmd1.push_constants, pc_cube, 128)
+            -- [NEW] Zero-Allocation Partial Push Constants
+            -- Replaces the ffi.new() GC spike. We only configure the 4 bytes that matter.
+            cmd1.pc_offset = 96
+            cmd1.pc_size = 4
+
+            local pc_points_ptr = ffi.cast(pc_ptr_type, cmd1.push_constants)
+            pc_points_ptr.target_state = 99
 
             cmd1.scissor_x = 0
             cmd1.scissor_y = 0
