@@ -29,6 +29,17 @@ const vec3 SHAPE_LIBRARY[14] = vec3[](
     vec3( 1.0,  1.0, -1.0), vec3(-1.0,  1.0, -1.0)
 );
 
+// The user's exact requested friendly palette
+const vec3 PALETTE[7] = vec3[](
+    vec3(1.00, 0.40, 0.70), // 0: Pink
+    vec3(0.15, 0.40, 0.90), // 1: Blue
+    vec3(0.65, 0.70, 0.75), // 2: Grey
+    vec3(0.60, 0.45, 0.35), // 3: Brownish
+    vec3(0.10, 0.50, 0.25), // 4: Dark Green
+    vec3(0.40, 0.85, 1.00), // 5: Light Blue
+    vec3(0.95, 0.15, 0.20)  // 6: Vibrant Red
+);
+
 float hash(uint n) {
     n = (n << 13U) ^ n;
     n = n * (n * n * 15731U + 789221U) + 1376312589U;
@@ -60,10 +71,10 @@ void main() {
 
     vec3 local_pos;
 
-    // --- DYNAMIC STATE BRANCHING ---
     if (pc.target_state == 88) {
         local_pos = vec3(0.0);
-        gl_PointSize = 2.0 + (h1 * 8.0);
+        // Vary point sizes heavily so they look like a dense, deep starfield
+        gl_PointSize = 2.0 + (h1 * 10.0);
     } else {
         local_pos = SHAPE_LIBRARY[gl_VertexIndex];
         vec3 scale = vec3(0.5 + h1 * 1.5, 0.5 + h2 * 3.0, 0.5 + h3 * 1.5) * 500.0;
@@ -84,27 +95,19 @@ void main() {
     v_worldPos = final_world_pos;
     v_shapeID = pc.target_state;
 
-    // --- CALCULATE COLOR HERE (Faster, passes via fragColor) ---
-    float spatial_wave = sin(anchor.x * 0.00015) * cos(anchor.z * 0.00015) * sin(anchor.y * 0.0001);
+    // --- DISCRETE SPATIAL COLOR BANDING ---
+    // Create large regions in 3D space (-1.0 to 1.0 roughly)
+    float spatial_wave = sin(anchor.x * 0.00012) * cos(anchor.y * 0.00015) + sin(anchor.z * 0.0001);
     float norm_wave = spatial_wave * 0.5 + 0.5;
 
-    vec3 c_meridian = vec3(0.0, 0.25, 0.85);
-    vec3 c_cyan     = vec3(0.10, 0.85, 0.70);
-    vec3 c_gold     = vec3(1.0, 0.65, 0.10);  
+    // Map to our 7 colors. We add h1 noise so the borders between color regions are fuzzy/dithered
+    float color_band = clamp((norm_wave * 6.99) + (h1 * 1.5 - 0.75), 0.0, 6.99);
+    uint color_idx = uint(color_band);
+    
+    vec3 swarm_color = PALETTE[color_idx];
 
-    vec3 swarm_color;
-    if (norm_wave < 0.6) {
-        swarm_color = mix(c_meridian, c_cyan, norm_wave * 1.66);
-    } else {
-        swarm_color = mix(c_cyan, c_gold, (norm_wave - 0.6) * 2.5);
-    }
+    // Give each individual particle a slight brightness variation (75% to 125%)
+    swarm_color *= (0.75 + 0.5 * h2);
 
-    swarm_color = mix(swarm_color, vec3(h1, h2, h3), 0.15);
-
-    if (pc.target_state == 99) {
-        swarm_color = mix(vec3(0.04, 0.06, 0.10), vec3(0.10, 0.25, 0.35), h2);
-    }
-
-    // Output to fragment shader!
     fragColor = swarm_color; 
 }
