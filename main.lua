@@ -136,7 +136,6 @@ ffi.cdef[[
         uint8_t _padding[24];
     } RenderPacket;
 
-    // WSI Bridge
     typedef struct {
         void* device;
         void* queue;
@@ -159,7 +158,7 @@ ffi.cdef[[
         void* pfnSetDepthTestEnable;
         void* pfnSetDepthWriteEnable;
         void* pfnSetDepthCompareOp;
-        uint64_t _padding[4]; // ADDED: Syncs FFI memory layout with C alignas(64)
+        uint64_t _padding[4];
     } RenderThreadInit;
 
     // Subsystem Interfaces

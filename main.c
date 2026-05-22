@@ -362,7 +362,7 @@ _Static_assert(sizeof(RenderPacket) == 256, "RenderPacket MUST be exactly 256 by
 #define LOAD(var) atomic_load_explicit(&(var), memory_order_acquire)
 #define STORE(var, val) atomic_store_explicit(&(var), (val), memory_order_release)
 
-typedef struct __attribute__((aligned(64))){
+typedef struct {
     VkDevice device;
     VkQueue queue;
     VkSwapchainKHR swapchain;
@@ -385,8 +385,8 @@ typedef struct __attribute__((aligned(64))){
     void* pfnSetDepthWriteEnable;
     void* pfnSetDepthCompareOp;
 
-    // FFI-SYNC-PADDING: Prevents misalignment in Lua FFI memory layout.
-    // Struct is exactly 416 bytes. 32 bytes padding snaps it to exactly 448 bytes (7 cache lines).
+    // FFI-SYNC-PADDING: Explicitly snaps the struct payload (416 bytes)
+    // to exactly 448 bytes (7 complete CPU cache lines).
     uint64_t _padding[4];
 } RenderThreadInit;
 
@@ -431,6 +431,10 @@ EXPORT int vibe_ring_get_write_idx() {
 }
 
 EXPORT void vibe_ring_submit(int idx) {
+    // FORCE HARDWARE MEMORY FLUSH:
+    // Guarantees all previous ffi.copy and pointer assignments from Lua
+    // are visible in RAM before the C-Core is allowed to read this slot.
+    atomic_thread_fence(memory_order_release);
     STORE(g_ring.ready_idx, idx);
 }
 
