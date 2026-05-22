@@ -59,6 +59,7 @@ TARGET_STRUCTS = {
     "VkPhysicalDeviceDynamicRenderingFeatures",
     "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT",
     "VkPhysicalDeviceExtendedDynamicState2FeaturesEXT",
+    "VkPhysicalDeviceExtendedDynamicState3FeaturesEXT",
     "VkImageCreateInfo",
     "VkMemoryAllocateInfo",
     "VkPipelineShaderStageCreateInfo",
