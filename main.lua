@@ -484,7 +484,7 @@ local function main()
             if last_key == 256 then -- ESCAPE
                 print("[LUA IO] ESCAPE PRESSED. Executing Teardown...")
                 ffi.C.vibe_trigger_shutdown()
-            elseif last_key == 294 then; -- GLFW_KEY_F5
+            elseif last_key == 294 then -- GLFW_KEY_F5
                 print("[LUA] Initiating Lock-Free Shader Hotswap...")
                 graphics.HotReloadShaders(vk, vk_state, gfx_state, frame_count)
             elseif last_key == 49 then -- '1' Key
