@@ -484,8 +484,8 @@ local function main()
             if last_key == 256 then -- ESCAPE
                 print("[LUA IO] ESCAPE PRESSED. Executing Teardown...")
                 ffi.C.vibe_trigger_shutdown()
-            elseif last_key == 294 then; -- GLFW_KEY_F5
-                wants_hotswap = true;    -- THE FIX: Flag it, don't execute immediately
+            elseif last_key == 294 then -- GLFW_KEY_F5
+                wants_hotswap = true    -- THE FIX: Flag it, don't execute immediately
             elseif last_key == 49 then -- '1' Key
                 active_render_mode = MODE_DUAL
                 print("[LUA] Switched to Dual Pipeline")
@@ -649,6 +649,7 @@ local function main()
             end
 
             sys_sleep(10)
+        end
     end
 
     print("[LUA CO] Render Loop Terminated. Frames: " .. tostring(frame_count))
