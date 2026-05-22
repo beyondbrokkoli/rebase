@@ -132,16 +132,16 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
         pQueuePriorities = queuePriority
     })
 
-    local deviceExtensions = ffi.new("const char*[9]", { -- Increased to 9
+    -- Enable Swapchain, Dynamic Rendering, and the entire dependency tree!
+    local deviceExtensions = ffi.new("const char*[8]", {
         "VK_KHR_swapchain",
         "VK_KHR_dynamic_rendering",
         "VK_KHR_depth_stencil_resolve",
         "VK_KHR_create_renderpass2",
         "VK_KHR_multiview",
         "VK_KHR_maintenance2",
-        "VK_EXT_extended_dynamic_state",
-        "VK_EXT_extended_dynamic_state2",
-        "VK_EXT_extended_dynamic_state3" -- ADD THIS LINE
+        "VK_EXT_extended_dynamic_state", -- The missing extension
+        "VK_EXT_extended_dynamic_state2" -- Depth states live here!
     })
 
     -- 1. Dynamic Rendering Feature
@@ -164,26 +164,18 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     extDynamicState2.pNext = extDynamicState
     extDynamicState2.extendedDynamicState2 = 1
 
-    local extDynamicState3 = ffi.new("VkPhysicalDeviceExtendedDynamicState3FeaturesEXT")
-    ffi.fill(extDynamicState3, ffi.sizeof(extDynamicState3))
-    extDynamicState3.sType = 1000455000
-    extDynamicState3.pNext = extDynamicState2 -- Chain it to EXT2!
-    -- This is the magic flag that silences the Validation Layer error
-    extDynamicState3.extendedDynamicState3PolygonMode = 0
-    extDynamicState3.dynamicPrimitiveTopologyUnrestricted = 1
-
     local deviceFeatures = ffi.new("VkPhysicalDeviceFeatures")
     ffi.fill(deviceFeatures, ffi.sizeof(deviceFeatures))
     deviceFeatures.largePoints = 1
 
+    -- 4. Device Creation
     local deviceCreateInfo = ffi.new("VkDeviceCreateInfo")
     ffi.fill(deviceCreateInfo, ffi.sizeof(deviceCreateInfo))
     deviceCreateInfo.sType = 3
-    -- IMPORTANT: Update the pNext to point to the END of the chain (EXT3)
-    deviceCreateInfo.pNext = extDynamicState3
+    deviceCreateInfo.pNext = extDynamicState2 -- Pass the head of the chain!
     deviceCreateInfo.queueCreateInfoCount = 1
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfo
-    deviceCreateInfo.enabledExtensionCount = 9 -- Update to 9!
+    deviceCreateInfo.enabledExtensionCount = 8
     deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions
     deviceCreateInfo.pEnabledFeatures = deviceFeatures
 
