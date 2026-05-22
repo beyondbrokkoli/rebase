@@ -426,7 +426,8 @@ EXPORT int vibe_ring_get_write_idx() {
             return idx; // Found the safe slot!
         }
     }
-    return 0; // Fallback
+    // THE FIX: Do not return 0. Return -1 to indicate ring saturation.
+    return -1;
 }
 
 EXPORT void vibe_ring_submit(int idx) {

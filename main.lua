@@ -484,9 +484,8 @@ local function main()
             if last_key == 256 then -- ESCAPE
                 print("[LUA IO] ESCAPE PRESSED. Executing Teardown...")
                 ffi.C.vibe_trigger_shutdown()
-            elseif last_key == 294 then -- GLFW_KEY_F5
-                print("[LUA] Initiating Lock-Free Shader Hotswap...")
-                graphics.HotReloadShaders(vk, vk_state, gfx_state, frame_count)
+            elseif last_key == 294 then; -- GLFW_KEY_F5
+                wants_hotswap = true;    -- THE FIX: Flag it, don't execute immediately
             elseif last_key == 49 then -- '1' Key
                 active_render_mode = MODE_DUAL
                 print("[LUA] Switched to Dual Pipeline")
@@ -515,141 +514,141 @@ local function main()
 
             -- 1. Get the actual ring buffer index for the WSI synchronization
             local write_idx = ffi.C.vibe_ring_get_write_idx()
-            local frame_offset = write_idx * FRAME_FLOAT_COUNT
 
-            local gpu_px = master_ptr + frame_offset
-            local gpu_py = master_ptr + (frame_offset + padded_capacity)
-            local gpu_pz = master_ptr + (frame_offset + (padded_capacity * 2))
 
-            vmath_lib.vibe_stream_positions(
-                padded_capacity,
-                c_px, c_py, c_pz,
-                gpu_px, gpu_py, gpu_pz
-            )
+            -- THE FIX: Only stream data and increment frame_count if we successfully acquired a slot
+            if write_idx ~= -1 then
+                local frame_offset = write_idx * FRAME_FLOAT_COUNT
+                local gpu_px = master_ptr + frame_offset
+                local gpu_py = master_ptr + (frame_offset + padded_capacity)
+                local gpu_pz = master_ptr + (frame_offset + (padded_capacity * 2))
 
-            -- 3. Tell the shaders where the positions live
-            pc.pos_x_idx = frame_offset
-            pc.pos_y_idx = frame_offset + padded_capacity
-            pc.pos_z_idx = frame_offset + (padded_capacity * 2)
-            pc.vel_x_idx = frame_offset + (padded_capacity * 3)
-            pc.vel_y_idx = frame_offset + (padded_capacity * 4)
-            pc.vel_z_idx = frame_offset + (padded_capacity * 5)
+                vmath_lib.vibe_stream_positions(
+                    padded_capacity,
+                    c_px, c_py, c_pz,
+                    gpu_px, gpu_py, gpu_pz
+                )
 
-            -- DATA-ORIENTED QUEUE POPULATION
-            local packet = ffi.C.vibe_ring_get_packet(write_idx)
-            local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
+                -- ... [Keep your packet assignment and cmd0/cmd1 draw routing logic exactly as is] ...
+                -- 3. Tell the shaders where the positions live
+                pc.pos_x_idx = frame_offset
+                pc.pos_y_idx = frame_offset + padded_capacity
+                pc.pos_z_idx = frame_offset + (padded_capacity * 2)
+                pc.vel_x_idx = frame_offset + (padded_capacity * 3)
+                pc.vel_y_idx = frame_offset + (padded_capacity * 4)
+                pc.vel_z_idx = frame_offset + (padded_capacity * 5)
 
-            -- 1. Populate Compute & Global Context
-            -- C still needs to know the global state for the RenderPass
-            packet.comp_pipeline = ffi.cast("uint64_t", comp_state.pipeline)
-            packet.comp_layout = ffi.cast("uint64_t", comp_state.pipelineLayout)
-            packet.comp_desc_set = ffi.cast("uint64_t", desc_state.set0)
-            packet.gfx_layout = ffi.cast("uint64_t", gfx_state.pipelineLayout)
-            packet.vertex_buffer = ffi.cast("uint64_t", master_gpu_block)
-            packet.index_buffer = ffi.cast("uint64_t", master_index_block)
-            packet.depth_image = ffi.cast("uint64_t", gfx_state.depthImage)
-            packet.depth_view = ffi.cast("uint64_t", gfx_state.depthImageView)
-            packet.width = sc_state.extent.width
-            packet.height = sc_state.extent.height
-            ffi.copy(packet.comp_pc_payload, pc, 128)
+                -- DATA-ORIENTED QUEUE POPULATION
+                local packet = ffi.C.vibe_ring_get_packet(write_idx)
+                local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
 
-            -- 2. Populate Draw Queue Data (DUAL DISPATCH)
-            local half_count = math.floor(pc.particle_count / 2)
+                -- 1. Populate Compute & Global Context
+                -- C still needs to know the global state for the RenderPass
+                packet.comp_pipeline = ffi.cast("uint64_t", comp_state.pipeline)
+                packet.comp_layout = ffi.cast("uint64_t", comp_state.pipelineLayout)
+                packet.comp_desc_set = ffi.cast("uint64_t", desc_state.set0)
+                packet.gfx_layout = ffi.cast("uint64_t", gfx_state.pipelineLayout)
+                packet.vertex_buffer = ffi.cast("uint64_t", master_gpu_block)
+                packet.index_buffer = ffi.cast("uint64_t", master_index_block)
+                packet.depth_image = ffi.cast("uint64_t", gfx_state.depthImage)
+                packet.depth_view = ffi.cast("uint64_t", gfx_state.depthImageView)
+                packet.width = sc_state.extent.width
+                packet.height = sc_state.extent.height
+                ffi.copy(packet.comp_pc_payload, pc, 128)
 
-            -- COMMAND 0: The Geometric Swarm (FULL PUSH)
-            local cmd0 = current_queue_ptr[0]
-            cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline_geom)
-            cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-            cmd0.index_count = 24
-            cmd0.first_index = 0
-            cmd0.vertex_offset = 0
-            -- cmd0.instance_count = half_count
-            cmd0.instance_count = pc.particle_count
-            cmd0.first_instance = 0
+                -- 2. Populate Draw Queue Data (DUAL DISPATCH)
+                local half_count = math.floor(pc.particle_count / 2)
 
-            -- [NEW] Define push constant range for CMD 0
-            cmd0.pc_offset = 0
-            cmd0.pc_size = 128
-            ffi.copy(cmd0.push_constants, pc, 128)
-
-            cmd0.scissor_x = 0
-            cmd0.scissor_y = 0
-            cmd0.scissor_w = sc_state.extent.width
-            cmd0.scissor_h = sc_state.extent.height
-            cmd0.cull_mode = 1
-            cmd0.front_face = 0
-            cmd0.topology = 3 -- Matches pipeline_geom (VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
-            cmd0.depth_test = 1
-            cmd0.depth_write = 1
-            cmd0.depth_compare_op = 4
-
-            -- ==========================================
-            -- COMMAND 1: The Point Cloud Nebula (PARTIAL PUSH)
-            -- ==========================================
-            local cmd1 = current_queue_ptr[1]
-            cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline_points)
-            cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-            cmd1.index_count = 1        -- 1 vertex per point particle
-            cmd1.first_index = 0        -- Just read index 0 (value doesn't matter since gl_VertexIndex is ignored)
-            cmd1.vertex_offset = 0
-            cmd1.instance_count = half_count
-            cmd1.first_instance = half_count
-
-            -- [NEW] Zero-Allocation Partial Push Constants
-            -- Replaces the ffi.new() GC spike. We only configure the 4 bytes that matter.
-            cmd1.pc_offset = 96
-            cmd1.pc_size = 4
-
-            local pc_points_ptr = ffi.cast(pc_ptr_type, cmd1.push_constants)
-            pc_points_ptr.target_state = 99
-
-            cmd1.scissor_x = 0
-            cmd1.scissor_y = 0
-            cmd1.scissor_w = sc_state.extent.width
-            cmd1.scissor_h = sc_state.extent.height
-            cmd1.cull_mode = 0
-            cmd1.front_face = 0
-            cmd1.topology = 0 -- Matches pipeline_points (VK_PRIMITIVE_TOPOLOGY_POINT_LIST)
-            cmd1.depth_test = 1
-            cmd1.depth_write = 1
-            cmd1.depth_compare_op = 4
-
-            -- [SURGICAL PATCH 4]: Dynamic Queue Routing
-            if active_render_mode == MODE_DUAL then
-                -- Split the load
-                cmd0.instance_count = half_count
-                cmd1.first_instance = half_count
-                cmd1.instance_count = half_count
-
-                packet.draw_queue = current_queue_ptr
-                packet.draw_count = 2
-
-            elseif active_render_mode == MODE_GEOM then
-                -- All particles to Geometry
+                -- COMMAND 0: The Geometric Swarm (FULL PUSH)
+                local cmd0 = current_queue_ptr[0]
+                cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline_geom)
+                cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+                cmd0.index_count = 24
+                cmd0.first_index = 0
+                cmd0.vertex_offset = 0
+                -- cmd0.instance_count = half_count
                 cmd0.instance_count = pc.particle_count
+                cmd0.first_instance = 0
 
-                packet.draw_queue = current_queue_ptr
-                packet.draw_count = 1
+                -- [NEW] Define push constant range for CMD 0
+                cmd0.pc_offset = 0
+                cmd0.pc_size = 128
+                ffi.copy(cmd0.push_constants, pc, 128)
 
-            elseif active_render_mode == MODE_POINTS then
-                -- All particles to Points. Start reading from index 0.
-                cmd1.first_instance = 0
-                cmd1.instance_count = pc.particle_count
+                cmd0.scissor_x = 0
+                cmd0.scissor_y = 0
+                cmd0.scissor_w = sc_state.extent.width
+                cmd0.scissor_h = sc_state.extent.height
+                cmd0.cull_mode = 1
+                cmd0.front_face = 0
+                cmd0.topology = 3 -- Matches pipeline_geom (VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+                cmd0.depth_test = 1
+                cmd0.depth_write = 1
+                cmd0.depth_compare_op = 4
 
-                -- FFI POINTER ARITHMETIC: Skip cmd0 entirely!
-                packet.draw_queue = current_queue_ptr + 1
-                packet.draw_count = 1
+                -- ==========================================
+                -- COMMAND 1: The Point Cloud Nebula (PARTIAL PUSH)
+                -- ==========================================
+                local cmd1 = current_queue_ptr[1]
+                cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline_points)
+                cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+                cmd1.index_count = 1        -- 1 vertex per point particle
+                cmd1.first_index = 0        -- Just read index 0 (value doesn't matter since gl_VertexIndex is ignored)
+                cmd1.vertex_offset = 0
+                cmd1.instance_count = half_count
+                cmd1.first_instance = half_count
+
+                -- [NEW] Zero-Allocation Partial Push Constants
+                -- Replaces the ffi.new() GC spike. We only configure the 4 bytes that matter.
+                cmd1.pc_offset = 96
+                cmd1.pc_size = 4
+
+                local pc_points_ptr = ffi.cast(pc_ptr_type, cmd1.push_constants)
+                pc_points_ptr.target_state = 99
+
+                cmd1.scissor_x = 0
+                cmd1.scissor_y = 0
+                cmd1.scissor_w = sc_state.extent.width
+                cmd1.scissor_h = sc_state.extent.height
+                cmd1.cull_mode = 0
+                cmd1.front_face = 0
+                cmd1.topology = 0 -- Matches pipeline_points (VK_PRIMITIVE_TOPOLOGY_POINT_LIST)
+                cmd1.depth_test = 1
+                cmd1.depth_write = 1
+                cmd1.depth_compare_op = 4
+
+                if active_render_mode == MODE_DUAL then
+                    cmd0.instance_count = half_count
+                    cmd1.first_instance = half_count
+                    cmd1.instance_count = half_count
+                    packet.draw_queue = current_queue_ptr
+                    packet.draw_count = 2
+                elseif active_render_mode == MODE_GEOM then
+                    cmd0.instance_count = pc.particle_count
+                    packet.draw_queue = current_queue_ptr
+                    packet.draw_count = 1
+                elseif active_render_mode == MODE_POINTS then
+                    cmd1.first_instance = 0
+                    cmd1.instance_count = pc.particle_count
+                    packet.draw_queue = current_queue_ptr + 1
+                    packet.draw_count = 1
+                end
+
+                -- Execute the debounced hotswap right before submission
+                if wants_hotswap then
+                    print("[LUA] Initiating Lock-Free Shader Hotswap...")
+                    graphics.HotReloadShaders(vk, vk_state, gfx_state, frame_count)
+                    wants_hotswap = false
+                end
+
+                ffi.C.vibe_ring_submit(write_idx)
+
+                -- Pump the queue only on valid GPU frames
+                graphics.PumpDeletionQueue(vk, vk_state, frame_count)
+                frame_count = frame_count + 1
             end
 
-            -- 4. Cross the boundary ONCE
-            ffi.C.vibe_ring_submit(write_idx)
-
-            -- >> NEW: Quietly destroy old Vulkan objects once they mathematically expire
-            graphics.PumpDeletionQueue(vk, vk_state, frame_count)
-
-            frame_count = frame_count + 1
-        end
-        sys_sleep(10)
+            sys_sleep(10)
     end
 
     print("[LUA CO] Render Loop Terminated. Frames: " .. tostring(frame_count))
