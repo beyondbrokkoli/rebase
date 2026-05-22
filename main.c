@@ -387,10 +387,11 @@ typedef struct __attribute__((aligned(64))){
 typedef struct {
     alignas(64) RenderPacket packets[RING_SIZE];
     alignas(64) _Atomic int ready_idx;
-    alignas(64) _Atomic int read_idx;
+    alignas(64) _Atomic uint32_t locked_mask; // REPLACES read_idx
 } RenderRing;
 
-static RenderRing g_ring = { .ready_idx = -1, .read_idx = -1 };
+// INSTANTIATE WITH MASK
+static RenderRing g_ring = { .ready_idx = -1, .locked_mask = 0 };
 static RenderThreadInit g_wsi;
 static vmath_thread_t g_render_thread;
 static atomic_int g_render_thread_active = 0;
@@ -398,9 +399,9 @@ static atomic_int g_render_thread_active = 0;
 EXPORT void vibe_ring_init_wsi(RenderThreadInit* wsi) {
     g_wsi = *wsi;
 
-    // Purge stale packets across WSI rebuilds
+    // Purge stale packets and zero the lock mask across WSI rebuilds
     atomic_store_explicit(&g_ring.ready_idx, -1, memory_order_release);
-    atomic_store_explicit(&g_ring.read_idx, -1, memory_order_release);
+    atomic_store_explicit(&g_ring.locked_mask, 0, memory_order_release);
 }
 
 EXPORT RenderPacket* vibe_ring_get_packet(int idx) {
@@ -408,18 +409,17 @@ EXPORT RenderPacket* vibe_ring_get_packet(int idx) {
 }
 
 EXPORT int vibe_ring_get_write_idx() {
+    uint32_t mask = LOAD(g_ring.locked_mask);
     int ready = LOAD(g_ring.ready_idx);
-    int read  = LOAD(g_ring.read_idx);
 
-    // Default to 0, otherwise take the next sequential buffer
-    int next = (ready == -1) ? 0 : (ready + 1) % RING_SIZE;
-
-    // Skip-Frame Guarantee: If we lap the GPU, step over the active read buffer
-    if (next == read) {
-        next = (next + 1) % RING_SIZE;
+    // Search forward from the last ready index for the ONE free slot
+    for (int i = 1; i <= RING_SIZE; i++) {
+        int idx = (ready + i) % RING_SIZE;
+        if ((mask & (1 << idx)) == 0) {
+            return idx; // Found the safe slot!
+        }
     }
-
-    return next;
+    return 0; // Fallback
 }
 
 EXPORT void vibe_ring_submit(int idx) {
@@ -599,6 +599,7 @@ THREAD_FUNC render_thread_loop(void* arg) {
 
     uint32_t current_frame = 0;
     int local_read = -1;
+    int active_ring_slots[3] = {-1, -1, -1}; // NEW: Tracks VRAM in flight
 
     // Typecast Vulkan WSI Pointers
     PFN_vkWaitForFences pfnWait = (PFN_vkWaitForFences)g_wsi.vkWaitForFences;
@@ -609,14 +610,27 @@ THREAD_FUNC render_thread_loop(void* arg) {
 
     while (atomic_load_explicit(&g_render_thread_active, memory_order_acquire) &&
            atomic_load_explicit(&g_engine.mailbox.is_running, memory_order_acquire)) {
-        // 2. Triad Consumer Handoff
+
         int ready = atomic_load_explicit(&g_ring.ready_idx, memory_order_acquire);
         if (ready == -1 || ready == local_read) {
-            SLEEP_MS(1);
-            continue; // Spinlock: Lua hasn't finished a new frame yet
+            SLEEP_MS(1); continue;
         }
-        local_read = ready;
-        atomic_store_explicit(&g_ring.read_idx, local_read, memory_order_release);
+        local_read = ready; // We have a new frame to process
+
+        // 1. Wait for GPU to finish the pipeline slot we are about to reuse
+        pfnWait(g_wsi.device, 1, &g_wsi.in_flight[current_frame], VK_TRUE, UINT64_MAX);
+
+        // 2. The GPU is done. UNLOCK the VRAM slot it was using.
+        int finished_slot = active_ring_slots[current_frame];
+        if (finished_slot != -1) {
+            uint32_t current_mask = LOAD(g_ring.locked_mask);
+            STORE(g_ring.locked_mask, current_mask & ~(1 << finished_slot));
+        }
+
+        // 3. LOCK the new VRAM slot so Lua can't overwrite it while it goes in flight
+        active_ring_slots[current_frame] = local_read;
+        uint32_t new_mask = LOAD(g_ring.locked_mask);
+        STORE(g_ring.locked_mask, new_mask | (1 << local_read));
 
         RenderPacket* p = &g_ring.packets[local_read];
         VkCommandBuffer cmd = cmd_buffers[current_frame];
