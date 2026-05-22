@@ -22,13 +22,18 @@ float hash(uint n) {
 void main() {
     uint p_id = gl_InstanceIndex;
     vec3 anchor = vec3(vram.data[pc.pos_x_idx + p_id], vram.data[pc.pos_y_idx + p_id], vram.data[pc.pos_z_idx + p_id]);
-    float h1 = hash(p_id); float h2 = hash(p_id + 1337);
-
-    // Optimized for iGPU survival. Max point size capped at 6.0 instead of 12.0.
-    gl_PointSize = 2.0 + (h1 * 4.0);
+    float h1 = hash(p_id); 
+    float h2 = hash(p_id + 1337);
 
     anchor.y += sin(pc.dt * 0.5 + h1 * 6.28) * 150.0;
-    gl_Position = pc.viewProj * vec4(anchor, 1.0);
+    
+    // Calculate final position first
+    vec4 clip_pos = pc.viewProj * vec4(anchor, 1.0);
+    gl_Position = clip_pos;
+
+    // Scale point size inversely by depth (clip_pos.w), clamped to a minimum of 1 pixel
+    float base_size = 2.0 + (h1 * 4.0);
+    gl_PointSize = max(1.0, base_size / max(1.0, clip_pos.w * 0.005));
 
     float spatial_wave = sin(anchor.x * 0.00012) * cos(anchor.y * 0.00015) + sin(anchor.z * 0.0001);
     fragColor = PALETTE[uint(clamp(((spatial_wave * 0.5 + 0.5) * 6.99) + (h1 * 1.5 - 0.75), 0.0, 6.99))] * (0.75 + 0.5 * h2);
