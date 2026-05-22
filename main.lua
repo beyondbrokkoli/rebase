@@ -10,7 +10,7 @@ local compute = require("compute_pipeline")
 local graphics = require("graphics_pipeline")
 local renderer = require("renderer")
 local os = require("os")
-local PCOUNT = 1000000
+local PCOUNT = 12000000
 -- HIGH-RESOLUTION KERNEL TIMER
 local get_time_hires
 
