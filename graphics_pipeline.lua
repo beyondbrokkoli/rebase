@@ -251,16 +251,20 @@ function GraphicsPipeline.Destroy(vk, core_state, gfx_state)
     if not gfx_state then return end
     local device = type(core_state) == "table" and core_state.device or core_state
 
-    vk.vkDestroyPipeline(device, gfx_state.pipeline_geom, nil)
-    vk.vkDestroyPipeline(device, gfx_state.pipeline_points, nil)
+    -- 1. Destroy Pipelines
+    if gfx_state.pipeline_geom then vk.vkDestroyPipeline(device, gfx_state.pipeline_geom, nil) end
+    if gfx_state.pipeline_points then vk.vkDestroyPipeline(device, gfx_state.pipeline_points, nil) end
 
-    vk.vkDestroyShaderModule(device, gfx_state.geomVertMod, nil)
-    vk.vkDestroyShaderModule(device, gfx_state.geomFragMod, nil)
-    vk.vkDestroyShaderModule(device, gfx_state.pointVertMod, nil)
-    vk.vkDestroyShaderModule(device, gfx_state.pointFragMod, nil)
-    vk.vkDestroyImageView(device, gfx_state.depthImageView, nil)
-    vk.vkDestroyImage(device, gfx_state.depthImage, nil)
-    vk.vkFreeMemory(device, gfx_state.depthMemory, nil)
+    -- 2. Destroy Specialized Shader Modules (Fixed Keys)
+    if gfx_state.gVert then vk.vkDestroyShaderModule(device, gfx_state.gVert, nil) end
+    if gfx_state.gFrag then vk.vkDestroyShaderModule(device, gfx_state.gFrag, nil) end
+    if gfx_state.pVert then vk.vkDestroyShaderModule(device, gfx_state.pVert, nil) end
+    if gfx_state.pFrag then vk.vkDestroyShaderModule(device, gfx_state.pFrag, nil) end
+
+    -- 3. Clear Framebuffer Resources
+    if gfx_state.depthImageView then vk.vkDestroyImageView(device, gfx_state.depthImageView, nil) end
+    if gfx_state.depthImage then vk.vkDestroyImage(device, gfx_state.depthImage, nil) end
+    if gfx_state.depthMemory then vk.vkFreeMemory(device, gfx_state.depthMemory, nil) end
 end
 
 return GraphicsPipeline
