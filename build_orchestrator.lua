@@ -190,7 +190,7 @@ local order = get_sorted_files()
 
 -- Explicitly add C backends to the snapshot since require() won't find them
 table.insert(order, "main.c")
-table.insert(order, "vibemath.c")
+table.insert(order, "vx_math.c")
 
 for _, src in ipairs(order) do
     local f = io.open(src, "r")
@@ -204,7 +204,7 @@ for _, src in ipairs(order) do
             minified_content = minify_lua(content)
         end
 
---        print("@@@ FILE: " .. src .. " @@@\n" .. minified_content)
+        print("@@@ FILE: " .. src .. " @@@\n" .. minified_content)
         f:close()
     end
 end
