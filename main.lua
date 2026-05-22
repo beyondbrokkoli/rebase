@@ -116,10 +116,30 @@ ffi.cdef[[
         uint8_t _reserved[10];
     } DrawCommand;
 
+    typedef struct {
+        uint64_t pipeline_id;
+        uint64_t layout_id;
+        uint64_t descriptor_set;
+        uint32_t group_x;
+        uint32_t group_y;
+        uint32_t group_z;
+        uint16_t pc_offset;
+        uint16_t pc_size;
+        uint32_t barrier_src_stage;
+        uint32_t barrier_dst_stage;
+        uint32_t barrier_src_access;
+        uint32_t barrier_dst_access;
+        uint8_t push_constants[128];
+        uint8_t _padding[8];
+    } ComputeCommand;
+
     typedef struct __attribute__((packed, aligned(64))) {
-        uint64_t comp_pipeline;
-        uint64_t comp_layout;
-        uint64_t comp_desc_set;
+        ComputeCommand* comp_queue;
+        uint32_t comp_count;
+        uint32_t _pad_comp;
+        DrawCommand* draw_queue;
+        uint32_t draw_count;
+        uint32_t _pad_draw;
         uint64_t gfx_layout;
         uint64_t vertex_buffer;
         uint64_t index_buffer;
@@ -129,11 +149,7 @@ ffi.cdef[[
         uint64_t depth_view;
         uint32_t width;
         uint32_t height;
-        uint32_t draw_count;
-        uint32_t _pad_ptr;
-        DrawCommand* draw_queue;
-        uint8_t comp_pc_payload[128];
-        uint8_t _padding[24];
+        uint8_t _padding[32];
     } RenderPacket;
 
     typedef struct {
@@ -301,6 +317,9 @@ local function main()
     -- Global Queue Allocation (Triple Buffered)
     local MAX_DRAW_COMMANDS = 1024
     local render_queues = ffi.new("DrawCommand[?]", MAX_DRAW_COMMANDS * 4)
+
+    local MAX_COMPUTE_COMMANDS = 16
+    local compute_queues = ffi.new("ComputeCommand[?]", MAX_COMPUTE_COMMANDS * 4)
 
     local frame_count = 0
     local pc = ffi.new("PushConstants")
@@ -537,15 +556,34 @@ local function main()
                 pc.vel_y_idx = frame_offset + (padded_capacity * 4)
                 pc.vel_z_idx = frame_offset + (padded_capacity * 5)
 
-                -- DATA-ORIENTED QUEUE POPULATION
                 local packet = ffi.C.vx_stream_packet(write_idx)
                 local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
+                local current_comp_queue = compute_queues + (write_idx * MAX_COMPUTE_COMMANDS)
 
-                -- 1. Populate Compute & Global Context
-                -- C still needs to know the global state for the RenderPass
-                packet.comp_pipeline = ffi.cast("uint64_t", comp_state.pipeline)
-                packet.comp_layout = ffi.cast("uint64_t", comp_state.pipelineLayout)
-                packet.comp_desc_set = ffi.cast("uint64_t", desc_state.set0)
+                -- 1. Configure the Compute Graph (Slot 0)
+                packet.comp_queue = current_comp_queue
+                packet.comp_count = 1
+
+                local comp0 = current_comp_queue[0]
+                comp0.pipeline_id = ffi.cast("uint64_t", comp_state.pipeline)
+                comp0.layout_id = ffi.cast("uint64_t", comp_state.pipelineLayout)
+                comp0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+
+                comp0.group_x = math.ceil(pc.particle_count / 256)
+                comp0.group_y = 1
+                comp0.group_z = 1
+
+                comp0.pc_offset = 0
+                comp0.pc_size = 128
+                ffi.copy(comp0.push_constants, pc, 128)
+
+                -- Replicate previous hardcoded barrier logic dynamically
+                comp0.barrier_src_stage = 2048 -- VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                comp0.barrier_dst_stage = 12   -- VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
+                comp0.barrier_src_access = 64  -- VK_ACCESS_SHADER_WRITE_BIT
+                comp0.barrier_dst_access = 36  -- VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT
+
+                -- 2. Configure Global Context
                 packet.gfx_layout = ffi.cast("uint64_t", gfx_state.pipelineLayout)
                 packet.vertex_buffer = ffi.cast("uint64_t", master_gpu_block)
                 packet.index_buffer = ffi.cast("uint64_t", master_index_block)
@@ -553,9 +591,8 @@ local function main()
                 packet.depth_view = ffi.cast("uint64_t", gfx_state.depthImageView)
                 packet.width = sc_state.extent.width
                 packet.height = sc_state.extent.height
-                ffi.copy(packet.comp_pc_payload, pc, 128)
 
-                -- 2. Populate Draw Queue Data (DUAL DISPATCH)
+                -- 3. Configure the Graphics Graph
                 local half_count = math.floor(pc.particle_count / 2)
 
                 -- COMMAND 0: The Geometric Swarm (FULL PUSH)
