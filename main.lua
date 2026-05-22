@@ -484,6 +484,9 @@ local function main()
             if last_key == 256 then -- ESCAPE
                 print("[LUA IO] ESCAPE PRESSED. Executing Teardown...")
                 ffi.C.vibe_trigger_shutdown()
+            elseif last_key == 294 then; -- GLFW_KEY_F5
+                print("[LUA] Initiating Lock-Free Shader Hotswap...")
+                graphics.HotReloadShaders(vk, vk_state, gfx_state, frame_count)
             elseif last_key == 49 then -- '1' Key
                 active_render_mode = MODE_DUAL
                 print("[LUA] Switched to Dual Pipeline")
@@ -640,6 +643,9 @@ local function main()
 
             -- 4. Cross the boundary ONCE
             ffi.C.vibe_ring_submit(write_idx)
+
+            -- >> NEW: Quietly destroy old Vulkan objects once they mathematically expire
+            graphics.PumpDeletionQueue(vk, vk_state, frame_count)
 
             frame_count = frame_count + 1
         end
