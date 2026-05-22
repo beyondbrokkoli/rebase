@@ -69,21 +69,16 @@ void main() {
     float h2 = hash(p_id + 1337);
     float h3 = hash(p_id + 42069);
 
-    // ==============================================================
-    // THE FIX: Unconditional assignment ensures the SPIR-V compiler 
-    // permanently bakes the PointSize capability into the module.
-    // ==============================================================
-    gl_PointSize = 2.0 + (h1 * 10.0);
-
     vec3 local_pos;
 
     if (pc.target_state == 88) {
         local_pos = vec3(0.0);
-        // gl_PointSize removed from here
+        // Vary point sizes heavily so they look like a dense, deep starfield
+        gl_PointSize = 2.0 + (h1 * 10.0);
     } else {
         local_pos = SHAPE_LIBRARY[gl_VertexIndex];
         vec3 scale = vec3(0.5 + h1 * 1.5, 0.5 + h2 * 3.0, 0.5 + h3 * 1.5) * 500.0;
-
+        
         if (pc.target_state == 99) scale *= 1.8;
 
         local_pos *= scale;
