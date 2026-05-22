@@ -535,56 +535,56 @@ local function main()
             -- 2. Populate Draw Queue Data (DUAL DISPATCH)
             local half_count = math.floor(pc.particle_count / 2)
 
--- Inside your render loop in main.lua
+            -- COMMAND 0: The Ice Shard Swarm (First Half)
+            local cmd0 = current_queue_ptr[0]
+            cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+            cmd0.index_count = 24
+            cmd0.first_index = 0
+            cmd0.vertex_offset = 0
+            cmd0.instance_count = half_count
+            cmd0.first_instance = 0
+            ffi.copy(cmd0.push_constants, pc, 128)
 
-local half_count = math.floor(pc.particle_count / 2)
-
--- COMMAND 0: The Geometric Swarm (Triangles)
-local cmd0 = current_queue_ptr[0]
-cmd0.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
-cmd0.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
-cmd0.index_count = 36 -- Assuming you want the Obsidian Cube (12 triangles)
-cmd0.first_index = 24
-cmd0.vertex_offset = 0
-cmd0.instance_count = half_count
-cmd0.first_instance = 0
-
--- State 1 tells the shader: "Apply rotation, scale, and shape library"
-pc.target_state = 1 
-ffi.copy(cmd0.push_constants, pc, 128)
-cmd0.scissor_x, cmd0.scissor_y = 0, 0
-cmd0.scissor_w, cmd0.scissor_h = sc_state.extent.width, sc_state.extent.height
-cmd0.cull_mode = 1
-cmd0.front_face = 0
-cmd0.topology = 3 -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-cmd0.depth_test, cmd0.depth_write = 1, 1
-cmd0.depth_compare_op = 4
-
--- COMMAND 1: The Point Cloud Nebula (Points)
-local cmd1 = current_queue_ptr[1]
-cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
-cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
--- For points, we only need 1 index per instance to trigger the shader
-cmd1.index_count = 1 
-cmd1.first_index = 0
-cmd1.vertex_offset = 0
-cmd1.instance_count = half_count
-cmd1.first_instance = half_count
-
-local pc_points = ffi.new("PushConstants")
-ffi.copy(pc_points, pc, 128)
--- State 88 tells the shader: "Bypass shape library, use gl_PointSize"
-pc_points.target_state = 88 
-ffi.copy(cmd1.push_constants, pc_points, 128)
-cmd1.scissor_x, cmd1.scissor_y = 0, 0
-cmd1.scissor_w, cmd1.scissor_h = sc_state.extent.width, sc_state.extent.height
-cmd1.cull_mode = 0 -- Disable culling for points
-cmd1.front_face = 0
-cmd1.topology = 0 -- VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-cmd1.depth_test, cmd1.depth_write = 1, 1
-cmd1.depth_compare_op = 4
+            -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
+            cmd0.scissor_x = 0
+            cmd0.scissor_y = 0
+            cmd0.scissor_w = sc_state.extent.width
+            cmd0.scissor_h = sc_state.extent.height
+            cmd0.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
+            cmd0.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+            cmd0.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+            cmd0.depth_test = 1        -- VK_TRUE
+            cmd0.depth_write = 1       -- VK_TRUE
+            cmd0.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
 
 
+            -- COMMAND 1: The Asteroid Cubes (Second Half)
+            local cmd1 = current_queue_ptr[1]
+            cmd1.pipeline_id = ffi.cast("uint64_t", gfx_state.pipeline)
+            cmd1.descriptor_set = ffi.cast("uint64_t", desc_state.set0)
+            cmd1.index_count = 36
+            cmd1.first_index = 24
+            cmd1.vertex_offset = 0
+            cmd1.instance_count = half_count
+            cmd1.first_instance = half_count
+
+            local pc_cube = ffi.new("PushConstants")
+            ffi.copy(pc_cube, pc, 128)
+            pc_cube.target_state = 99
+            ffi.copy(cmd1.push_constants, pc_cube, 128)
+
+            -- >>> POPULATE DYNAMIC STATES FOR 3D OPAQUE GEOMETRY <<<
+            cmd1.scissor_x = 0
+            cmd1.scissor_y = 0
+            cmd1.scissor_w = sc_state.extent.width
+            cmd1.scissor_h = sc_state.extent.height
+            cmd1.cull_mode = 1         -- VK_CULL_MODE_BACK_BIT
+            cmd1.front_face = 0 -- VK_FRONT_FACE_COUNTER_CLOCKWISE
+            cmd1.topology = 3   -- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+            cmd1.depth_test = 1        -- VK_TRUE
+            cmd1.depth_write = 1       -- VK_TRUE
+            cmd1.depth_compare_op = 4  -- VK_COMPARE_OP_LESS
 
             -- 3. Bind the queue to the Ring Buffer packet
             packet.draw_queue = current_queue_ptr
