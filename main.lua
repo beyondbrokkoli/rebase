@@ -412,59 +412,65 @@ local function main()
                 ffi.C.vx_sys_window_size(new_w, new_h)
 
                 if new_w[0] > 0 and new_h[0] > 0 then
-                    graphics.Destroy(vk, vk_state, gfx_state)
-                    swapchain_core.Destroy(vk, vk_state, sc_state)
-                    renderer.Destroy(vk, device, sync_state, 3)
+                    local new_sc_state = swapchain_core.Init(vk, vk_state, new_w[0], new_h[0])
 
-                    sc_state = swapchain_core.Init(vk, vk_state, new_w[0], new_h[0])
-                    gfx_state = graphics.Init(vk, vk_state, new_w[0], new_h[0], desc_state.pipelineLayout, sc_state.format)
+                    -- THE FIX: Only proceed if the swapchain actually built
+                    if new_sc_state ~= nil then
+                        graphics.Destroy(vk, vk_state, gfx_state)
+                        swapchain_core.Destroy(vk, vk_state, sc_state)
+                        renderer.Destroy(vk, device, sync_state, 3)
 
-                    local fresh_sync = renderer.InitSync(vk, device, 3)
-                    sync_state.imageAvailable = fresh_sync.imageAvailable
-                    sync_state.renderFinished = fresh_sync.renderFinished
-                    sync_state.inFlight = fresh_sync.inFlight
+                        sc_state = new_sc_state
+                        gfx_state = graphics.Init(vk, vk_state, new_w[0], new_h[0], desc_state.pipelineLayout, sc_state.format)
 
-                    frame_state.viewport[0].width = new_w[0]
-                    frame_state.viewport[0].height = new_h[0]
-                    frame_state.scissor[0].extent.width = new_w[0]
-                    frame_state.scissor[0].extent.height = new_h[0]
-                    frame_state.renderInfo[0].renderArea.extent.width = new_w[0]
-                    frame_state.renderInfo[0].renderArea.extent.height = new_h[0]
+                        local fresh_sync = renderer.InitSync(vk, device, 3)
+                        -- ... [Rest of the rebuild logic] ...
+                        sync_state.imageAvailable = fresh_sync.imageAvailable
+                        sync_state.renderFinished = fresh_sync.renderFinished
+                        sync_state.inFlight = fresh_sync.inFlight
 
-                    local safe_h = math.max(1, new_h[0])
-                    aspect = new_w[0] / safe_h
-                    vmath.perspective_inf_revz(70.0, aspect, 0.1, proj)
+                        frame_state.viewport[0].width = new_w[0]
+                        frame_state.viewport[0].height = new_h[0]
+                        frame_state.scissor[0].extent.width = new_w[0]
+                        frame_state.scissor[0].extent.height = new_h[0]
+                        frame_state.renderInfo[0].renderArea.extent.width = new_w[0]
+                        frame_state.renderInfo[0].renderArea.extent.height = new_h[0]
 
-                    local new_wsi = ffi.new("RenderThreadInit")
-                    new_wsi.device = device
-                    new_wsi.queue = vk_state.queue
-                    new_wsi.swapchain = sc_state.handle
-                    for i=0, sc_state.imageCount-1 do
-                        new_wsi.swapchain_images[i] = ffi.cast("uint64_t", sc_state.images[i])
-                        new_wsi.swapchain_views[i] = ffi.cast("uint64_t", sc_state.imageViews[i])
-                        new_wsi.render_finished[i] = sync_state.renderFinished[i]
+                        local safe_h = math.max(1, new_h[0])
+                        aspect = new_w[0] / safe_h
+                        vmath.perspective_inf_revz(70.0, aspect, 0.1, proj)
+
+                        local new_wsi = ffi.new("RenderThreadInit")
+                        new_wsi.device = device
+                        new_wsi.queue = vk_state.queue
+                        new_wsi.swapchain = sc_state.handle
+                        for i=0, sc_state.imageCount-1 do
+                            new_wsi.swapchain_images[i] = ffi.cast("uint64_t", sc_state.images[i])
+                            new_wsi.swapchain_views[i] = ffi.cast("uint64_t", sc_state.imageViews[i])
+                            new_wsi.render_finished[i] = sync_state.renderFinished[i]
+                        end
+                        for i=0, 2 do
+                            new_wsi.image_available[i] = sync_state.imageAvailable[i]
+                            new_wsi.in_flight[i] = sync_state.inFlight[i]
+                        end
+                        new_wsi.vkWaitForFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkWaitForFences"))
+                        new_wsi.vkAcquireNextImageKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR"))
+                        new_wsi.vkResetFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkResetFences"))
+                        new_wsi.vkQueueSubmit = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueueSubmit"))
+                        new_wsi.vkQueuePresentKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueuePresentKHR"))
+                        new_wsi.pfnBegin = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR"))
+                        new_wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
+
+                        new_wsi.pfnSetCullMode = vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT")
+                        new_wsi.pfnSetFrontFace = vk.vkGetDeviceProcAddr(device, "vkCmdSetFrontFaceEXT")
+                        new_wsi.pfnSetPrimitiveTopology = vk.vkGetDeviceProcAddr(device, "vkCmdSetPrimitiveTopologyEXT")
+                        new_wsi.pfnSetDepthTestEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT")
+                        new_wsi.pfnSetDepthWriteEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT")
+                        new_wsi.pfnSetDepthCompareOp = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT")
+
+                        ffi.C.vx_stream_init(new_wsi)
+                        ffi.C.vx_thread_start()
                     end
-                    for i=0, 2 do
-                        new_wsi.image_available[i] = sync_state.imageAvailable[i]
-                        new_wsi.in_flight[i] = sync_state.inFlight[i]
-                    end
-                    new_wsi.vkWaitForFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkWaitForFences"))
-                    new_wsi.vkAcquireNextImageKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR"))
-                    new_wsi.vkResetFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkResetFences"))
-                    new_wsi.vkQueueSubmit = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueueSubmit"))
-                    new_wsi.vkQueuePresentKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkQueuePresentKHR"))
-                    new_wsi.pfnBegin = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR"))
-                    new_wsi.pfnEnd = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
-
-                    new_wsi.pfnSetCullMode = vk.vkGetDeviceProcAddr(device, "vkCmdSetCullModeEXT")
-                    new_wsi.pfnSetFrontFace = vk.vkGetDeviceProcAddr(device, "vkCmdSetFrontFaceEXT")
-                    new_wsi.pfnSetPrimitiveTopology = vk.vkGetDeviceProcAddr(device, "vkCmdSetPrimitiveTopologyEXT")
-                    new_wsi.pfnSetDepthTestEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthTestEnableEXT")
-                    new_wsi.pfnSetDepthWriteEnable = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthWriteEnableEXT")
-                    new_wsi.pfnSetDepthCompareOp = vk.vkGetDeviceProcAddr(device, "vkCmdSetDepthCompareOpEXT")
-
-                    ffi.C.vx_stream_init(new_wsi)
-                    ffi.C.vx_thread_start()
                 end
                 print("[LUA CO] Rebuild Complete.")
                 is_resizing = false

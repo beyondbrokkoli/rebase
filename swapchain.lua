@@ -4,15 +4,21 @@ local Swapchain = {}
 
 function Swapchain.Init(vk, core_state, width, height)
     print("[SWAPCHAIN] Building the display chain...")
-
-    -- 1. Query Surface Capabilities
     local surfaceCaps = ffi.new("VkSurfaceCapabilitiesKHR")
     vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(core_state.physicalDevice, core_state.surface, surfaceCaps)
 
-    -- VULKAN EXTENT CLAMP: Override requested size with true driver capabilities
-    -- [PATCHED]: Clamped to 1x1 minimum to survive OS minimization/F11 0x0 extent crashes
+    -- ========================================================
+    -- THE FIX: Zero-Extent Guard
+    -- If the OS minimizes or collapses the window during a resize,
+    -- the max extent becomes 0x0. We must abort swapchain creation.
+    -- ========================================================
+    if surfaceCaps.maxImageExtent.width == 0 or surfaceCaps.maxImageExtent.height == 0 then
+        print("[SWAPCHAIN WARNING] Surface extent is 0x0 (Minimized/Transitioning). Aborting rebuild.")
+        return nil
+    end
+
     local actualExtent = surfaceCaps.currentExtent
-    if actualExtent.width ~= 4294967295 then -- 0xFFFFFFFF
+    if actualExtent.width ~= 4294967295 then
         width = math.max(1, tonumber(actualExtent.width))
         height = math.max(1, tonumber(actualExtent.height))
     else
