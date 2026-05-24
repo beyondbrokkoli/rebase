@@ -6,22 +6,27 @@ local Descriptors = {}
 function Descriptors.Init(vk, device, master_gpu_buffer)
     print("[DESCRIPTORS] Wiring Master VRAM Arena as a Unified SSBO...")
 
-    -- Stage Bits
+    -- ==========================================
+    -- THE FIX: Adding Fragment Stage Access
+    -- ==========================================
     local STAGE_VERTEX = 1
+    local STAGE_FRAGMENT = 16    -- <--- ADDED: VK_SHADER_STAGE_FRAGMENT_BIT
     local STAGE_COMPUTE = 32
-    local STAGE_ALL = bit.bor(STAGE_VERTEX, STAGE_COMPUTE)
+    local STAGE_ALL = bit.bor(STAGE_VERTEX, STAGE_FRAGMENT, STAGE_COMPUTE)
 
     -- 1. Descriptor Set Layout Binding (Single SSBO)
     local ssboBinding = ffi.new("VkDescriptorSetLayoutBinding[1]")
     ssboBinding[0].binding = 0
     ssboBinding[0].descriptorType = 7 -- VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
     ssboBinding[0].descriptorCount = 1
-    ssboBinding[0].stageFlags = STAGE_ALL
+    
+    -- Bonus: This now allows the Fragment shader to read the MasterBuffer too!
+    ssboBinding[0].stageFlags = STAGE_ALL 
     ssboBinding[0].pImmutableSamplers = nil
 
     local layoutInfo = ffi.new("VkDescriptorSetLayoutCreateInfo")
     ffi.fill(layoutInfo, ffi.sizeof(layoutInfo))
-    layoutInfo.sType = 32 -- VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+    layoutInfo.sType = 32 
     layoutInfo.bindingCount = 1
     layoutInfo.pBindings = ssboBinding
 
@@ -29,12 +34,11 @@ function Descriptors.Init(vk, device, master_gpu_buffer)
     assert(vk.vkCreateDescriptorSetLayout(device, layoutInfo, nil, pLayout) == 0, "FATAL: Layout Creation Failed")
     local unifiedSetLayout = pLayout[0]
 
-    -- 2. Push Constant Range (64-Byte Router)
+    -- 2. Push Constant Range (128-Byte Router)
     local pushRange = ffi.new("VkPushConstantRange[1]")
-    -- pushRange[0].stageFlags = STAGE_ALL
-    -- pushRange[0].stageFlags = 1 -- VK_SHADER_STAGE_VERTEX_BIT
-    -- Bitwise OR to grant access to both stages
-    pushRange[0].stageFlags = bit.bor(STAGE_VERTEX, STAGE_COMPUTE)
+    
+    -- THE FIX: Grant access to Vertex, Compute, AND Fragment
+    pushRange[0].stageFlags = STAGE_ALL 
     pushRange[0].offset = 0
     pushRange[0].size = 128
 

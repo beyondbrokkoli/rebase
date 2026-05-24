@@ -71,15 +71,16 @@ ffi.cdef[[
         uint32_t pos_z_idx;
         uint32_t particle_count;
         float dt;
-        uint32_t vel_x_idx;
-        uint32_t vel_y_idx;
-        uint32_t vel_z_idx;
+
+        float total_time;
+        float spread;
+        float highlight_power;
+        uint32_t algae_color;  // Packed RGBA
+        uint32_t water_color;  // Packed RGBA
+        uint32_t bg_color_a;   // Packed RGBA
+        uint32_t bg_color_b;   // Packed RGBA
+
         uint32_t target_state;
-        uint32_t push_active;
-        uint32_t pull_active;
-        float mouse_x;
-        float mouse_y;
-        // THE FUSE: Padding replaced with Index Offsets (12 bytes)
         uint32_t sorted_idx;
         uint32_t cell_counters_idx;
         uint32_t cell_offsets_idx;
@@ -162,7 +163,7 @@ ffi.cdef[[
         uint64_t swapchain_images[10];
         uint64_t swapchain_views[10];
         void* image_available[3];
-        void* render_finished[10];
+        void* render_finished[3];
         void* in_flight[3];
         void* vkWaitForFences;
         void* vkAcquireNextImageKHR;
@@ -177,7 +178,7 @@ ffi.cdef[[
         void* pfnSetDepthTestEnable;
         void* pfnSetDepthWriteEnable;
         void* pfnSetDepthCompareOp;
-        uint64_t _padding[4];
+        uint64_t _padding[3]; // Must match C exactly
     } RenderThreadInit;
 
     // Subsystem Interfaces
@@ -252,7 +253,8 @@ local function main()
 
     local FRAME_FLOAT_COUNT = padded_capacity * 3
     local FRAME_UINT_COUNT = padded_capacity        -- Sorted Indices
-    local FRAME_CELL_COUNT = NUM_CELLS * 2          -- Counters + Offsets
+    -- 2 arrays of NUM_CELLS, plus 128 words for the parallel scan group offsets
+    local FRAME_CELL_COUNT = (NUM_CELLS * 2) + 128;
 
     local FRAME_TOTAL_WORDS = FRAME_FLOAT_COUNT + FRAME_UINT_COUNT + FRAME_CELL_COUNT
 
@@ -294,15 +296,20 @@ local function main()
     wsi.device = device
     wsi.queue = vk_state.queue
     wsi.swapchain = sc_state.handle
+
+    -- 1. Only map images to imageCount
     for i=0, sc_state.imageCount-1 do
-        wsi.swapchain_images[i] = ffi.cast("uint64_t", sc_state.images[i])
-        wsi.swapchain_views[i] = ffi.cast("uint64_t", sc_state.imageViews[i])
-        wsi.render_finished[i] = sync_state.renderFinished[i]
+        wsi.swapchain_images[i] = ffi.cast("uint64_t", sc_state.images[i]);
+        wsi.swapchain_views[i] = ffi.cast("uint64_t", sc_state.imageViews[i]);
     end
+
+    -- 2. Map ALL sync objects to the 3 frames in flight
     for i=0, 2 do
-        wsi.image_available[i] = sync_state.imageAvailable[i]
-        wsi.in_flight[i] = sync_state.inFlight[i]
+        wsi.image_available[i] = sync_state.imageAvailable[i];
+        wsi.render_finished[i] = sync_state.renderFinished[i]; -- FIX: Moved here
+        wsi.in_flight[i] = sync_state.inFlight[i];
     end
+
     wsi.vkWaitForFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkWaitForFences"))
     wsi.vkAcquireNextImageKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR"))
     wsi.vkResetFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkResetFences"))
@@ -394,7 +401,9 @@ local function main()
 
     print("[LUA CO] Entering Flattened Render Loop...")
     local pc_ptr_type = ffi.typeof("PushConstants*")
-    -- FLATTENED RENDER LOOP (No Yielding)
+
+    local total_time = 0.0
+
     while ffi.C.vx_core_is_running() == 1 do
         if ffi.C.vx_sys_resize_flag() == 1 then
             is_resizing = true
@@ -444,14 +453,17 @@ local function main()
                         new_wsi.device = device
                         new_wsi.queue = vk_state.queue
                         new_wsi.swapchain = sc_state.handle
+                        -- 1. Only map images to imageCount
                         for i=0, sc_state.imageCount-1 do
-                            new_wsi.swapchain_images[i] = ffi.cast("uint64_t", sc_state.images[i])
-                            new_wsi.swapchain_views[i] = ffi.cast("uint64_t", sc_state.imageViews[i])
-                            new_wsi.render_finished[i] = sync_state.renderFinished[i]
+                            new_wsi.swapchain_images[i] = ffi.cast("uint64_t", sc_state.images[i]);
+                            new_wsi.swapchain_views[i] = ffi.cast("uint64_t", sc_state.imageViews[i]);
                         end
+
+                        -- 2. Map ALL sync objects to the 3 frames in flight
                         for i=0, 2 do
-                            new_wsi.image_available[i] = sync_state.imageAvailable[i]
-                            new_wsi.in_flight[i] = sync_state.inFlight[i]
+                            new_wsi.image_available[i] = sync_state.imageAvailable[i];
+                            new_wsi.render_finished[i] = sync_state.renderFinished[i]; -- FIX: Moved here
+                            new_wsi.in_flight[i] = sync_state.inFlight[i];
                         end
                         new_wsi.vkWaitForFences = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkWaitForFences"))
                         new_wsi.vkAcquireNextImageKHR = ffi.cast("void*", vk.vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR"))
@@ -506,6 +518,19 @@ local function main()
                          cam_pos.x + fwd_x, cam_pos.y + fwd_y, cam_pos.z + fwd_z,
                          view)
             pc.dt = pc.dt + dt
+            total_time = total_time + dt
+            pc.total_time = total_time
+
+            -- Artistic Parameters
+            pc.spread = 120.0
+            pc.highlight_power = 64.0
+
+            -- Hex Colors (Format: 0xAABBGGRR)
+            pc.algae_color = 0xFF22AA44 -- Vibrant Algals Green
+            pc.water_color = 0xFFFF8800 -- Deep Ocean/Cyan
+            pc.bg_color_a  = 0xFF221515 -- Deep Charcoal
+            pc.bg_color_b  = 0xFF442211 -- Dark Indigo
+
             vmath.multiply_mat4(proj, view, pc.viewProj)
 
             local space_is_down = (ffi.C.vx_input_spacebar() == 1)
@@ -574,11 +599,6 @@ local function main()
                 pc.pos_y_idx = frame_offset + padded_capacity
                 pc.pos_z_idx = frame_offset + (padded_capacity * 2)
 
-                -- We don't stream velocity to the GPU, so zero these out
-                pc.vel_x_idx = 0
-                pc.vel_y_idx = 0
-                pc.vel_z_idx = 0
-
                 -- PHASE V: Bind the Grid Sorting Data (Directly after pos_z)
                 pc.sorted_idx = frame_offset + (padded_capacity * 3)
                 pc.cell_counters_idx = pc.sorted_idx + padded_capacity
@@ -588,12 +608,12 @@ local function main()
                 local current_queue_ptr = render_queues + (write_idx * MAX_DRAW_COMMANDS)
                 local current_comp_queue = compute_queues + (write_idx * MAX_COMPUTE_COMMANDS)
 
-                -- THE 4-PASS COMPUTE GRAPH (Zero Allocation)
+                -- THE Multi-PASS COMPUTE GRAPH (Zero Allocation)
                 packet.comp_queue = current_comp_queue
-                packet.comp_count = 4
+                packet.comp_count = 2
 
                 -- Common state for all passes
-                for c = 0, 3 do
+                for c = 0, 5 do
                     current_comp_queue[c].layout_id = ffi.cast("uint64_t", comp_state.pipelineLayout)
                     current_comp_queue[c].descriptor_set = ffi.cast("uint64_t", desc_state.set0)
                     current_comp_queue[c].group_y = 1
@@ -621,17 +641,43 @@ local function main()
                 c1.barrier_src_access = 64
                 c1.barrier_dst_access = 96
 
-                -- PASS 2: Prefix Scan (Single Threaded Block)
-                local c2 = current_comp_queue[2]
-                c2.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_scan)
-                c2.group_x = 1
-                c2.barrier_src_stage = 2048
-                c2.barrier_dst_stage = 2048 -- Wait before Reorder
-                c2.barrier_src_access = 64
-                c2.barrier_dst_access = 96
+                -- Reason: Chaining compute passes with explicit barriers prevents the race condition that caused the validation layer explosion.
+                local GROUP_SIZE = 1024
+                local NUM_CELLS = 262144
+                local ELEMENTS_PER_GROUP = GROUP_SIZE * 2
+                local NUM_GROUPS = NUM_CELLS / ELEMENTS_PER_GROUP -- 128 groups
+
+                -- Pass 1: Local Scan & Group Sum Extraction
+                local c2_0 = current_comp_queue[2]
+                c2_0.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_scan_local)
+                c2_0.group_x = NUM_GROUPS
+                c2_0.barrier_src_stage = 2048
+                c2_0.barrier_dst_stage = 2048
+                c2_0.barrier_src_access = 64
+                c2_0.barrier_dst_access = 96 -- SHADER_WRITE to SHADER_READ|WRITE
+
+                -- Pass 2: Scan the 128 Group Sums
+                local c2_1 = current_comp_queue[3]
+                c2_1.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_scan_group)
+                c2_1.group_x = 1 -- Single workgroup handles the 128 sums
+                c2_1.barrier_src_stage = 2048
+                c2_1.barrier_dst_stage = 2048
+                c2_1.barrier_src_access = 64
+                c2_1.barrier_dst_access = 96
+
+                -- Pass 3: Propagate Base Offsets
+                local c2_2 = current_comp_queue[4]
+                c2_2.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_scan_add)
+                c2_2.group_x = NUM_GROUPS
+                c2_2.barrier_src_stage = 2048
+                c2_2.barrier_dst_stage = 2048
+                c2_2.barrier_src_access = 64
+                c2_2.barrier_dst_access = 96
+
+                -- (Remember to shift your reorder pass to c3 / index 5 and increase packet.comp_count to 6)
 
                 -- PASS 3: Reorder & Scatter
-                local c3 = current_comp_queue[3]
+                local c3 = current_comp_queue[5]
                 c3.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_reorder)
                 c3.group_x = math.ceil(pc.particle_count / 256)
                 c3.barrier_src_stage = 2048
@@ -673,7 +719,7 @@ local function main()
                 cmd0.scissor_y = 0
                 cmd0.scissor_w = sc_state.extent.width
                 cmd0.scissor_h = sc_state.extent.height
-                cmd0.cull_mode = 1
+                cmd0.cull_mode = 0
                 cmd0.front_face = 0
                 cmd0.topology = 3 -- Matches pipeline_geom (VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
                 cmd0.depth_test = 1
@@ -694,11 +740,15 @@ local function main()
 
                 -- [NEW] Zero-Allocation Partial Push Constants
                 -- Replaces the ffi.new() GC spike. We only configure the 4 bytes that matter.
-                cmd1.pc_offset = 96
-                cmd1.pc_size = 4
+                cmd1.pc_offset = 0
+                cmd1.pc_size = 128
 
+                -- First, copy the entire baseline state from 'pc'
+                ffi.copy(cmd1.push_constants, pc, 128)
+
+                -- Then, modify the specific 4 bytes for the point mode inside cmd1's local copy
                 local pc_points_ptr = ffi.cast(pc_ptr_type, cmd1.push_constants)
-                pc_points_ptr.target_state = 99
+                pc_points_ptr.target_state = 88
 
                 cmd1.scissor_x = 0
                 cmd1.scissor_y = 0

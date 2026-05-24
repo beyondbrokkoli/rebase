@@ -284,15 +284,16 @@ typedef struct {
     uint32_t pos_z_idx;
     uint32_t particle_count;
     float dt;
-    uint32_t vel_x_idx;
-    uint32_t vel_y_idx;
-    uint32_t vel_z_idx;
+
+    float total_time;
+    float spread;
+    float highlight_power;
+    uint32_t algae_color;  // Packed RGBA
+    uint32_t water_color;  // Packed RGBA
+    uint32_t bg_color_a;   // Packed RGBA
+    uint32_t bg_color_b;   // Packed RGBA
+
     uint32_t target_state;
-    uint32_t push_active;
-    uint32_t pull_active;
-    float mouse_x;
-    float mouse_y;
-    // REPLACED: uint32_t _padding[3];
     uint32_t sorted_idx;
     uint32_t cell_counters_idx;
     uint32_t cell_offsets_idx;
@@ -388,7 +389,7 @@ typedef struct {
     uint64_t swapchain_images[10];
     uint64_t swapchain_views[10];
     VkSemaphore image_available[3];
-    VkSemaphore render_finished[10];
+    VkSemaphore render_finished[3]; // Dropped 56 bytes
     VkFence in_flight[3];
     void* vkWaitForFences;
     void* vkAcquireNextImageKHR;
@@ -404,9 +405,9 @@ typedef struct {
     void* pfnSetDepthWriteEnable;
     void* pfnSetDepthCompareOp;
 
-    // FFI-SYNC-PADDING: Explicitly snaps the struct payload (416 bytes)
-    // to exactly 448 bytes (7 complete CPU cache lines).
-    uint64_t _padding[4];
+    // FFI-SYNC-PADDING: Explicitly snaps the struct payload (360 bytes)
+    // to exactly 384 bytes (6 complete CPU cache lines).
+    uint64_t _padding[3];
 } RenderThreadInit;
 
 // FFI-CONTRACT: RenderPacket mapping
@@ -474,7 +475,7 @@ EXPORT void vx_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand
 
         // Push constants OR'd with VERTEX_BIT to safely cover the unified pipeline layout configuration
         vkCmdPushConstants(cmd, (VkPipelineLayout)comp_cmd->layout_id,
-                           VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+                           VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            comp_cmd->pc_offset, comp_cmd->pc_size, comp_cmd->push_constants + comp_cmd->pc_offset);
 
         vkCmdDispatch(cmd, comp_cmd->group_x, comp_cmd->group_y, comp_cmd->group_z);
@@ -600,7 +601,7 @@ EXPORT void vx_record_commands(VkCommandBuffer cmd, RenderPacket* p, DrawCommand
         vkCmdPushConstants(
             cmd,
             (VkPipelineLayout)p->gfx_layout,
-            VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+            VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             draw->pc_offset,
             draw->pc_size,
             draw->push_constants + draw->pc_offset
@@ -714,8 +715,9 @@ THREAD_FUNC render_thread_loop(void* arg) {
         vkResetCommandBuffer(cmd, 0);
         vx_record_commands(cmd, p, p->draw_queue, p->draw_count, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
 
-        // 5. Submit
+
         VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        // 2. Lock the signal semaphore to the CPU frame
         VkSubmitInfo submitInfo = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .waitSemaphoreCount = 1,
@@ -724,20 +726,18 @@ THREAD_FUNC render_thread_loop(void* arg) {
             .commandBufferCount = 1,
             .pCommandBuffers = &cmd,
             .signalSemaphoreCount = 1,
-            // CHANGE 1: Use img_idx to guarantee 1:1 mapping with the acquired image
-            .pSignalSemaphores = &g_wsi.render_finished[img_idx]
+            .pSignalSemaphores = &g_wsi.render_finished[current_frame] // FIX: Was [img_idx]
         };
         pfnSubmit(g_wsi.queue, 1, &submitInfo, g_wsi.in_flight[current_frame]);
 
-        // 6. Present
+        // 3. Lock the present wait semaphore to the CPU frame
         VkPresentInfoKHR presentInfo = {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            // CHANGE 2: Wait on the semaphore tied to this specific image
-            .pWaitSemaphores = &g_wsi.render_finished[img_idx],
+            .pWaitSemaphores = &g_wsi.render_finished[current_frame], // FIX: Was [img_idx]
             .swapchainCount = 1,
             .pSwapchains = &g_wsi.swapchain,
-            .pImageIndices = &img_idx
+            .pImageIndices = &img_idx // This is the ONLY place img_idx should be used
         };
         pfnPresent(g_wsi.queue, &presentInfo);
 

@@ -63,7 +63,7 @@ function core.create_instance()
         pApplicationInfo = appInfo,
         enabledExtensionCount = total_exts,
         ppEnabledExtensionNames = instanceExtensions,
-        enabledLayerCount = 1,
+        enabledLayerCount = 0,
         ppEnabledLayerNames = validationLayers
     })
 

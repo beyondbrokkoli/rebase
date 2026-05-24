@@ -10,17 +10,14 @@ ffi.cdef[[
     typedef PFN_vkCmdEndRendering PFN_vkCmdEndRenderingKHR;
 ]]
 local Renderer = {}
-Renderer.RenderMode = {
-    LUA_NATIVE = 0,
-    C_HOST = 1
-}
-function Renderer.InitSync(vk, device, frames_in_flight)
-    print("[RENDERER] Forging Synchronization Primitives...")
 
-    local max_swapchain_images = 10
-    local imageAvailable = ffi.new("VkSemaphore[?]", max_swapchain_images)
-    local renderFinished = ffi.new("VkSemaphore[?]", max_swapchain_images)
-    local inFlight = ffi.new("VkFence[?]", frames_in_flight)
+function Renderer.InitSync(vk, device, frames_in_flight)
+    print("[RENDERER] Forging Synchronization Primitives...");
+
+    local max_swapchain_images = 10;
+    local imageAvailable = ffi.new("VkSemaphore[?]", frames_in_flight); -- Best practice to match
+    local renderFinished = ffi.new("VkSemaphore[?]", frames_in_flight); -- FIX: Was max_swapchain_images
+    local inFlight = ffi.new("VkFence[?]", frames_in_flight);
 
     local semInfo = ffi.new("VkSemaphoreCreateInfo", { sType = 9 })
     local fenceInfo = ffi.new("VkFenceCreateInfo", {
@@ -28,12 +25,10 @@ function Renderer.InitSync(vk, device, frames_in_flight)
         flags = 1
     })
 
-    for i = 0, max_swapchain_images - 1 do
+    -- Consolidate creation into a single loop bound by frames_in_flight
+    for i = 0, frames_in_flight - 1 do
         assert(vk.vkCreateSemaphore(device, semInfo, nil, imageAvailable + i) == 0)
         assert(vk.vkCreateSemaphore(device, semInfo, nil, renderFinished + i) == 0)
-    end
-
-    for i = 0, frames_in_flight - 1 do
         assert(vk.vkCreateFence(device, fenceInfo, nil, inFlight + i) == 0)
     end
 
@@ -43,7 +38,6 @@ function Renderer.InitSync(vk, device, frames_in_flight)
         inFlight = inFlight
     }
 end
-
 function Renderer.AllocateFrameState(vk, device, width, height)
     local state = {}
 
@@ -180,14 +174,10 @@ function Renderer.Destroy(vk, device, sync, frames_in_flight)
     vk.vkDeviceWaitIdle(device)
     if not sync then return end
 
-    local max_swapchain_images = 10
-    for i = 0, max_swapchain_images - 1 do
-        vk.vkDestroySemaphore(device, sync.imageAvailable[i], nil)
-        vk.vkDestroySemaphore(device, sync.renderFinished[i], nil)
-    end
-
     for i = 0, frames_in_flight - 1 do
-        vk.vkDestroyFence(device, sync.inFlight[i], nil)
+        vk.vkDestroySemaphore(device, sync.imageAvailable[i], nil);
+        vk.vkDestroySemaphore(device, sync.renderFinished[i], nil);
+        vk.vkDestroyFence(device, sync.inFlight[i], nil);
     end
 end
 

@@ -39,15 +39,15 @@ local function compile_engine(platform)
     if platform == "linux" then
         -- LINUX BUILD PIPELINE
         print("\n[1/3] Compiling SPIR-V Shaders...")
-        os.execute("glslc geom.vert -o geom_vert.spv")
-        os.execute("glslc geom.frag -o geom_frag.spv")
-        os.execute("glslc points.vert -o points_vert.spv")
-        os.execute("glslc points.frag -o points_frag.spv")
+        os.execute("glslc render.vert -o render_vert.spv")
+        os.execute("glslc render.frag -o render_frag.spv")
+
         os.execute("glslc clear.comp -o clear_comp.spv")
         os.execute("glslc hash.comp -o hash_comp.spv")
-        os.execute("glslc scan.comp -o scan_comp.spv")
+        os.execute("glslc scan_local.comp -o scan_local_comp.spv")
+        os.execute("glslc scan_group.comp -o scan_group_comp.spv")
+        os.execute("glslc scan_add.comp -o scan_add_comp.spv")
         os.execute("glslc reorder.comp -o reorder_comp.spv")
-
 
         print("\n[2/3] Compiling libvx_math.so (AVX2 Worker Pool) ...")
         local linux_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -fPIC -pthread vx_math.c -o libvx_math.so -lm"
@@ -67,15 +67,15 @@ local function compile_engine(platform)
         -- WINDOWS BUILD PIPELINE
         print("\n[1/4] Compiling SPIR-V Shaders...")
         local glslc = VULKAN_SDK_PATH .. "/Bin/glslc.exe"
-        os.execute(glslc .. " geom.vert -o geom_vert.spv")
-        os.execute(glslc .. " geom.frag -o geom_frag.spv")
-        os.execute(glslc .. " points.vert -o points_vert.spv")
-        os.execute(glslc .. " points.frag -o points_frag.spv")
-        os.execute(glslc .. " clear.comp -o clear_comp.spv")
-        os.execute(glslc .. " hash.comp -o hash_comp.spv")
-        os.execute(glslc .. " scan.comp -o scan_comp.spv")
-        os.execute(glslc .. " reorder.comp -o reorder_comp.spv")
+        os.execute(glslc .. " render.vert -o render_vert.spv")
+        os.execute(glslc .. " render.frag -o render_frag.spv")
 
+        os.execute("glslc clear.comp -o clear_comp.spv")
+        os.execute("glslc hash.comp -o hash_comp.spv")
+        os.execute("glslc scan_local.comp -o scan_local_comp.spv")
+        os.execute("glslc scan_group.comp -o scan_group_comp.spv")
+        os.execute("glslc scan_add.comp -o scan_add_comp.spv")
+        os.execute("glslc reorder.comp -o reorder_comp.spv")
 
         print("\n[2/4] Compiling vx_math.dll (AVX2 Worker Pool) ...")
         local win_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -pthread vx_math.c -o vx_math.dll -lm"
@@ -212,7 +212,7 @@ for _, src in ipairs(order) do
             minified_content = minify_lua(content)
         end
 
---        print("@@@ FILE: " .. src .. " @@@\n" .. minified_content)
+        print("@@@ FILE: " .. src .. " @@@\n" .. minified_content)
         f:close()
     end
 end

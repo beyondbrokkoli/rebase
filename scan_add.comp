@@ -1,0 +1,33 @@
+#version 460
+layout(local_size_x = 1024) in;
+
+layout(set = 0, binding = 0) buffer MasterBuffer { uint data[]; } vram;
+
+// (Include the exact same PushConstants block as above)
+layout(push_constant) uniform PushConstants {
+    mat4 viewProj;
+    uint pos_x_idx; uint pos_y_idx; uint pos_z_idx;
+    uint particle_count; float dt;
+    float total_time; float spread; float highlight_power;
+    uint algae_color; uint water_color; uint bg_color_a; uint bg_color_b;
+    uint target_state;
+    uint sorted_idx; uint cell_counters_idx; uint cell_offsets_idx;
+} pc;
+
+void main() {
+    uint lid = gl_LocalInvocationID.x;
+    uint gid = gl_WorkGroupID.x;
+    
+    // Read the base offset computed in Pass 2
+    uint base_offset = vram.data[pc.cell_offsets_idx + 262144 + gid];
+    
+    uint idx0 = gid * 2048 + (lid * 2);
+    uint idx1 = gid * 2048 + (lid * 2) + 1;
+    
+    vram.data[pc.cell_offsets_idx + idx0] += base_offset;
+    vram.data[pc.cell_offsets_idx + idx1] += base_offset;
+    
+    // TRICK: Zero out the counters here so we can skip the Clear.comp pass next frame if we want to!
+    vram.data[pc.cell_counters_idx + idx0] = 0;
+    vram.data[pc.cell_counters_idx + idx1] = 0;
+}

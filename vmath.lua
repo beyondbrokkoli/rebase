@@ -5,7 +5,7 @@ local vmath = {}
 -- Define 16-byte aligned structs for SIMD readiness in C
 ffi.cdef[[
     typedef struct __attribute__((aligned(16))) { float x, y, z, w; } vec4_t;
-    typedef struct __attribute__((aligned(64))) { float m[16]; } mat4_t;
+    typedef struct __attribute__((aligned(16))) { float m[16]; } mat4_t;
 ]]
 
 -- Pre-allocate ALL workspace memory to strictly prevent Garbage Collection
