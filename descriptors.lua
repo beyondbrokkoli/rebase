@@ -6,9 +6,7 @@ local Descriptors = {}
 function Descriptors.Init(vk, device, master_gpu_buffer)
     print("[DESCRIPTORS] Wiring Master VRAM Arena as a Unified SSBO...")
 
-    -- ==========================================
     -- THE FIX: Adding Fragment Stage Access
-    -- ==========================================
     local STAGE_VERTEX = 1
     local STAGE_FRAGMENT = 16    -- <--- ADDED: VK_SHADER_STAGE_FRAGMENT_BIT
     local STAGE_COMPUTE = 32
