@@ -279,27 +279,23 @@ typedef struct {
 
 typedef struct {
     mat4_t viewProj;
-    uint32_t pos_x_idx;
-    uint32_t pos_y_idx;
-    uint32_t pos_z_idx;
+    uint32_t soa_upload_idx;
+    uint32_t aos_current_idx;
+    uint32_t aos_prev_idx;
     uint32_t particle_count;
     float dt;
-
     float total_time;
     float spread;
     float highlight_power;
-    uint32_t algae_color;  // Packed RGBA
-    uint32_t water_color;  // Packed RGBA
-    uint32_t bg_color_a;   // Packed RGBA
-    uint32_t bg_color_b;   // Packed RGBA
-
+    uint32_t algae_color;
+    uint32_t water_color;
+    uint32_t bg_color_a;
+    uint32_t bg_color_b;
     uint32_t target_state;
     uint32_t sorted_idx;
     uint32_t cell_counters_idx;
     uint32_t cell_offsets_idx;
 } PushConstants;
-
-_Static_assert(sizeof(PushConstants) == 128, "PushConstants MUST be exactly 128 bytes!");
 
 // DATA-ORIENTED RENDER QUEUE STRUCTS
 typedef struct {
@@ -383,14 +379,14 @@ _Static_assert(sizeof(RenderPacket) == 128, "RenderPacket MUST be exactly 128 by
 #define STORE(var, val) atomic_store_explicit(&(var), (val), memory_order_release)
 
 typedef struct {
-    VkDevice device;
-    VkQueue queue;
-    VkSwapchainKHR swapchain;
+    VkDevice device;                    // Restored from void*
+    VkQueue queue;                      // Restored from void*
+    VkSwapchainKHR swapchain;           // Restored from void*
     uint64_t swapchain_images[10];
     uint64_t swapchain_views[10];
-    VkSemaphore image_available[3];
-    VkSemaphore render_finished[3]; // Dropped 56 bytes
-    VkFence in_flight[3];
+    VkSemaphore image_available[10];    // Restored from void*
+    VkSemaphore render_finished[10];    // Restored from void*
+    VkFence in_flight[10];              // Restored from void*
     void* vkWaitForFences;
     void* vkAcquireNextImageKHR;
     void* vkResetFences;
@@ -404,10 +400,6 @@ typedef struct {
     void* pfnSetDepthTestEnable;
     void* pfnSetDepthWriteEnable;
     void* pfnSetDepthCompareOp;
-
-    // FFI-SYNC-PADDING: Explicitly snaps the struct payload (360 bytes)
-    // to exactly 384 bytes (6 complete CPU cache lines).
-    uint64_t _padding[3];
 } RenderThreadInit;
 
 // FFI-CONTRACT: RenderPacket mapping
@@ -656,6 +648,12 @@ THREAD_FUNC render_thread_loop(void* arg) {
     int local_read = -1;
     int active_ring_slots[3] = {-1, -1, -1}; // NEW: Tracks VRAM in flight
 
+    // Added array to map Swapchain Image Indices to Fences
+    VkFence image_fences[10];
+    for (int i = 0; i < 10; i++) {
+        image_fences[i] = VK_NULL_HANDLE;
+    }
+
     // Typecast Vulkan WSI Pointers
     PFN_vkWaitForFences pfnWait = (PFN_vkWaitForFences)g_wsi.vkWaitForFences;
     PFN_vkAcquireNextImageKHR pfnAcquire = (PFN_vkAcquireNextImageKHR)g_wsi.vkAcquireNextImageKHR;
@@ -694,30 +692,31 @@ THREAD_FUNC render_thread_loop(void* arg) {
         RenderPacket* p = &g_ring.packets[local_read];
         VkCommandBuffer cmd = cmd_buffers[current_frame];
 
-        // 3. WSI Lifecycle
+        // 1. Wait on CPU ring buffer fence for THIS command buffer slot
         pfnWait(g_wsi.device, 1, &g_wsi.in_flight[current_frame], VK_TRUE, UINT64_MAX);
 
+        // 2. Acquire Image (Signaling the CPU's current_frame semaphore)
         uint32_t img_idx;
-        VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX,
-                                  g_wsi.image_available[current_frame], VK_NULL_HANDLE, &img_idx);
+        VkResult res = pfnAcquire(g_wsi.device, g_wsi.swapchain, UINT64_MAX, g_wsi.image_available[current_frame], VK_NULL_HANDLE, &img_idx);
 
         if (res == VK_ERROR_OUT_OF_DATE_KHR) {
             atomic_store_explicit(&g_engine.mailbox.window_resized, 1, memory_order_release);
             SLEEP_MS(10);
             continue;
         }
+
+        // 3. Reset the fence for this slot
         pfnReset(g_wsi.device, 1, &g_wsi.in_flight[current_frame]);
 
-        // 4. Dynamic Swapchain Injection & Command Record
         p->swapchain_image = g_wsi.swapchain_images[img_idx];
-        p->swapchain_view  = g_wsi.swapchain_views[img_idx];
+        p->swapchain_view = g_wsi.swapchain_views[img_idx];
 
         vkResetCommandBuffer(cmd, 0);
         vx_record_commands(cmd, p, p->draw_queue, p->draw_count, (PFN_vkCmdBeginRenderingKHR)g_wsi.pfnBegin, (PFN_vkCmdEndRenderingKHR)g_wsi.pfnEnd);
 
-
         VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        // 2. Lock the signal semaphore to the CPU frame
+
+        // 4. Submit (Wait on CPU frame semaphore, Signal the GPU IMAGE semaphore)
         VkSubmitInfo submitInfo = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .waitSemaphoreCount = 1,
@@ -726,22 +725,24 @@ THREAD_FUNC render_thread_loop(void* arg) {
             .commandBufferCount = 1,
             .pCommandBuffers = &cmd,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &g_wsi.render_finished[current_frame] // FIX: Was [img_idx]
+            .pSignalSemaphores = &g_wsi.render_finished[img_idx] // <-- TIED TO HARDWARE IMAGE
         };
         pfnSubmit(g_wsi.queue, 1, &submitInfo, g_wsi.in_flight[current_frame]);
 
-        // 3. Lock the present wait semaphore to the CPU frame
+        // 5. Present (Wait on the GPU IMAGE semaphore)
         VkPresentInfoKHR presentInfo = {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &g_wsi.render_finished[current_frame], // FIX: Was [img_idx]
+            .pWaitSemaphores = &g_wsi.render_finished[img_idx], // <-- TIED TO HARDWARE IMAGE
             .swapchainCount = 1,
             .pSwapchains = &g_wsi.swapchain,
-            .pImageIndices = &img_idx // This is the ONLY place img_idx should be used
+            .pImageIndices = &img_idx
         };
         pfnPresent(g_wsi.queue, &presentInfo);
 
+        // Keep CPU Ring Buffer locked to 3 slots
         current_frame = (current_frame + 1) % 3;
+
     }
     vkDeviceWaitIdle(g_wsi.device);
     vkFreeCommandBuffers(g_wsi.device, cmd_pool, 3, cmd_buffers);

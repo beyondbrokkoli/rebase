@@ -2,7 +2,7 @@ local ffi = require("ffi")
 
 local Swapchain = {}
 
-function Swapchain.Init(vk, core_state, width, height)
+function Swapchain.Init(vk, core_state, width, height, old_swapchain)
     print("[SWAPCHAIN] Building the display chain...")
     local surfaceCaps = ffi.new("VkSurfaceCapabilitiesKHR")
     vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(core_state.physicalDevice, core_state.surface, surfaceCaps)
@@ -30,6 +30,10 @@ function Swapchain.Init(vk, core_state, width, height)
     ffi.fill(swapchainInfo, ffi.sizeof(swapchainInfo))
     swapchainInfo.sType = 1000001000
     swapchainInfo.surface = core_state.surface
+
+    -- INJECT THE OLD SWAPCHAIN HERE
+    swapchainInfo.oldSwapchain = old_swapchain or ffi.cast("VkSwapchainKHR", 0)
+
     swapchainInfo.minImageCount = surfaceCaps.minImageCount + 1
     swapchainInfo.imageFormat = 50
     swapchainInfo.imageColorSpace = 0
@@ -45,6 +49,11 @@ function Swapchain.Init(vk, core_state, width, height)
 
     local pSwapchain = ffi.new("VkSwapchainKHR[1]")
     local res = vk.vkCreateSwapchainKHR(core_state.device, swapchainInfo, nil, pSwapchain)
+    -- Gracefully back out of volatile WM resizes instead of fatal asserts
+    if res == -1000000001 then
+        print("[SWAPCHAIN WARNING] Surface volatile. Retrying next frame...")
+        return nil
+    end
     assert(res == 0, "FATAL: Failed to create Swapchain! Error: " .. tonumber(res))
     local swapchain = pSwapchain[0]
 
