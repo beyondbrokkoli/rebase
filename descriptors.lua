@@ -12,16 +12,16 @@ function Descriptors.Init(vk, device, master_gpu_buffer)
     local STAGE_VERTEX = 1
     local STAGE_FRAGMENT = 16    -- <--- ADDED: VK_SHADER_STAGE_FRAGMENT_BIT
     local STAGE_COMPUTE = 32
-    local STAGE_ALL = bit.bor(STAGE_VERTEX, STAGE_FRAGMENT, STAGE_COMPUTE)
+    local STAGE_ALL = bit.bor(STAGE_VERTEX, STAGE_COMPUTE, STAGE_FRAGMENT)
 
     -- 1. Descriptor Set Layout Binding (Single SSBO)
     local ssboBinding = ffi.new("VkDescriptorSetLayoutBinding[1]")
     ssboBinding[0].binding = 0
     ssboBinding[0].descriptorType = 7 -- VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
     ssboBinding[0].descriptorCount = 1
-    
+
     -- Bonus: This now allows the Fragment shader to read the MasterBuffer too!
-    ssboBinding[0].stageFlags = STAGE_ALL 
+    ssboBinding[0].stageFlags = STAGE_ALL
     ssboBinding[0].pImmutableSamplers = nil
 
     local layoutInfo = ffi.new("VkDescriptorSetLayoutCreateInfo")

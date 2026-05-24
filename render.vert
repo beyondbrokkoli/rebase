@@ -42,11 +42,7 @@ uint get_cell_id(vec3 pos) {
 }
 
 void main() {
-    uint p_id = gl_InstanceIndex;
-    
-    // 1. THE SEPARATION: 1:1 Mapping. 
-    // We completely ignore pc.sorted_idx. This kills the ring-buffer flicker permanently.
-    uint real_p_id = p_id; 
+    uint real_p_id = gl_InstanceIndex;
 
     vec3 anchor = vec3(
         uintBitsToFloat(vram.data[pc.pos_x_idx + real_p_id]),
@@ -54,51 +50,15 @@ void main() {
         uintBitsToFloat(vram.data[pc.pos_z_idx + real_p_id])
     );
 
-    // 2. DENSITY READ
-    uint cell = get_cell_id(anchor);
-    uint density = vram.data[pc.cell_counters_idx + cell];
-
-    // 3. HASH GENERATION (Unchanged)
     float h1 = hash(real_p_id);
     float h2 = hash(real_p_id + 1337);
     float h3 = hash(real_p_id + 42069);
-    float h4 = hash(real_p_id + 9999); // The Phantom Decimation Dice
+    float h4 = hash(real_p_id + 9999); 
 
-    // 4. THE SPLIT DENSITY ENGINE (Heat & Culling)
-    float ALLOWED_DENSITY = 5.0;
-    float overcrowded = max(float(density) - ALLOWED_DENSITY, 0.0);
-    
-    // "heat" goes from 0.0 (calm) to 1.0 (highly overcrowded)
-    float heat = clamp(overcrowded * 0.05, 0.0, 1.0); 
-
-    // Point Cloud: Physical Decimation
-    float point_scale_fade = 1.0;
-    if (pc.target_state == 88) {
-        float survival_rate = 1.0 - heat;
-        point_scale_fade = smoothstep(0.0, 0.5, survival_rate - h4 + 0.25);
-
-        // ZERO-COST CULL: Only applies to points now! Geometry is structurally immune.
-        if (point_scale_fade <= 0.001) {
-            gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-            return;
-        }
-    }
-
-    // [Space Warp logic goes here (Unchanged)]
-    float normalized_y = clamp((anchor.y + 5000.0) / 10000.0, 0.0, 1.0);
-    float meridian_curve = smoothstep(0.3, 0.7, normalized_y);
-    // anchor.y += pc.spread * meridian_curve * 100.0;
-    // anchor.x += sin(pc.total_time * 5.0 + anchor.y * 0.01) * 20.0;
-
+    // 1. CALCULATE POSITION EARLY
     vec3 local_pos = vec3(0.0);
-
-    // 5. GEOMETRY GENERATION
-    if (pc.target_state == 88) {
-        // Points use the physical fade
-        gl_PointSize = (2.0 + (h2 * 8.0)) * point_scale_fade;
-    } else {
+    if (pc.target_state != 88) {
         local_pos = SHAPE_LIBRARY[gl_VertexIndex];
-        // Geometry ignores scale_fade, retaining full 1.0 volume
         vec3 scale = vec3(0.5 + h1 * 1.5, 0.5 + h2 * 3.0, 0.5 + h3 * 1.5) * 500.0;
         local_pos *= scale;
 
@@ -109,24 +69,51 @@ void main() {
     }
 
     vec3 final_pos = anchor + local_pos;
+    vec4 clip_pos = pc.viewProj * vec4(final_pos, 1.0);
     
-    // 6. DENSITY COLOR FADING (The Heatmap Effect)
+    // The 'w' component is our linear distance from the camera!
+    float dist = max(clip_pos.w, 0.001); 
+
+    // 2. DISTANCE-AWARE DENSITY ENGINE
+    uint cell = get_cell_id(anchor);
+    uint density = vram.data[pc.cell_counters_idx + cell];
+
+    // The further away a cell is, the higher density we tolerate before culling.
+    // This stabilizes the grid and completely eliminates distance flickering.
+    float ALLOWED_DENSITY = 5.0 + (dist * 0.0015); 
+    float overcrowded = max(float(density) - ALLOWED_DENSITY, 0.0);
+    float heat = clamp(overcrowded * 0.05, 0.0, 1.0);
+
+    float point_scale_fade = 1.0;
+    if (pc.target_state == 88) {
+        float survival_rate = 1.0 - heat;
+        point_scale_fade = smoothstep(0.0, 0.5, survival_rate - h4 + 0.25);
+
+        if (point_scale_fade <= 0.001) {
+            gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+            return;
+        }
+
+        // 3. PERSPECTIVE POINT SCALING
+        // We hijacked pc.spread (which is 120.0 in Lua) to act as a master size multiplier
+        float base_size = (2.0 + (h2 * 8.0)) * point_scale_fade;
+        gl_PointSize = max(1.0, (base_size * pc.spread * 60.0) / dist);
+    }
+
+    // 4. COLOR & OUTPUT
+    float normalized_y = clamp((anchor.y + 5000.0) / 10000.0, 0.0, 1.0);
+    float meridian_curve = smoothstep(0.3, 0.7, normalized_y);
+
     vec3 c_algae = unpackUnorm4x8(pc.algae_color).rgb;
     vec3 c_water = unpackUnorm4x8(pc.water_color).rgb;
     vec3 base_color = mix(c_water, c_algae, meridian_curve);
-    
-    // Define an "Overcrowded" energy color (e.g., bright neon pink/magenta)
-    // You can customize this vec3 to whatever fits your engine's aesthetic
-    vec3 heat_color = vec3(1.0, 0.2, 0.6); 
-    
-    // Shift the color based on the cell's heat. 
-    // Crowded geometry will glow hot, sparse geometry stays natural.
+
+    vec3 heat_color = vec3(1.0, 0.2, 0.6);
     vec3 final_color = mix(base_color, heat_color, heat);
     final_color *= (0.75 + 0.5 * h1);
 
     v_worldPos = final_pos;
-    gl_Position = pc.viewProj * vec4(final_pos, 1.0);
-
+    gl_Position = clip_pos; // Assign the already computed matrix translation
     fragColor = final_color;
     v_shapeID = pc.target_state;
     v_colorIdx = meridian_curve;
