@@ -579,7 +579,6 @@ local function main()
             -- 1. Get the actual ring buffer index for the WSI synchronization
             local write_idx = ffi.C.vx_stream_acquire()
 
-
             if write_idx ~= -1 then
                 -- 1. Advance the unified frame offset pointer
                 local frame_offset = write_idx * FRAME_TOTAL_WORDS
