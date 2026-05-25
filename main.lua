@@ -10,7 +10,18 @@ local compute = require("compute_pipeline")
 local graphics = require("graphics_pipeline")
 local renderer = require("renderer")
 local os = require("os")
-local PCOUNT = 1000000
+-- 1. Load the registry
+local reg = require("registry")
+
+-- 2. Destructure exactly what we need into local namespaces
+local sys, cfg, win  = reg.sys, reg.cfg, reg.win
+local move, mouse, key = reg.move, reg.mouse, reg.key
+local mode = reg.mode
+local vk_state, vk_stage, vk_access = reg.vk_state, reg.vk_stage, reg.vk_access
+
+-- We can now use them directly!
+local PCOUNT = cfg.pcount
+
 -- HIGH-RESOLUTION KERNEL TIMER
 local get_time_hires
 
@@ -213,7 +224,7 @@ local function main()
     ffi.C.vx_sys_publish_instance(vk_state.instance)
 
     print("[LUA IO] Ordering C-Core to Boot GLFW Window...")
-    ffi.C.vx_sys_set_cmd(1, 1280, 720)
+    ffi.C.vx_sys_set_cmd(sys.boot, win.w, win.h)
 
     while ffi.C.vx_sys_get_surface() == nil do
         -- Waiting for async C core window creation
@@ -554,19 +565,19 @@ local function main()
 
             -- The Input Router
             local last_key = ffi.C.vx_input_last_key()
-            if last_key == 256 then -- ESCAPE
-                print("[LUA IO] ESCAPE PRESSED. Executing Teardown...")
+
+            if last_key == key.esc then
                 ffi.C.vx_core_shutdown()
-            elseif last_key == 294 then -- GLFW_KEY_F5
-                wants_hotswap = true    -- THE FIX: Flag it, don't execute immediately
-            elseif last_key == 49 then -- '1' Key
-                active_render_mode = MODE_DUAL
+            elseif last_key == key.f5 then
+                wants_hotswap = true
+            elseif last_key == key.num1 then
+                active_render_mode = mode.dual
                 print("[LUA] Switched to Dual Pipeline")
-            elseif last_key == 50 then -- '2' Key
-                active_render_mode = MODE_GEOM
+            elseif last_key == key.num2 then
+                active_render_mode = mode.geom
                 print("[LUA] Switched to 100% Geometry")
-            elseif last_key == 51 then -- '3' Key
-                active_render_mode = MODE_POINTS
+            elseif last_key == key.num3 then
+                active_render_mode = mode.points
                 print("[LUA] Switched to 100% Point Cloud")
             end
             -- HIJACK: Use the unused bg_color_a for our render mode flag
@@ -641,14 +652,14 @@ local function main()
                     ffi.copy(current_comp_queue[c].push_constants, pc, 128)
                 end
 
-                -- PASS 0: Clear Counters
+                -- Before: c0.barrier_src_stage = 2048
                 local c0 = current_comp_queue[0]
                 c0.pipeline_id = ffi.cast("uint64_t", comp_state.pipe_clear)
-                c0.group_x = math.ceil(NUM_CELLS / 256)
-                c0.barrier_src_stage = 2048 -- COMPUTE
-                c0.barrier_dst_stage = 2048 -- Wait before Hashing
-                c0.barrier_src_access = 64  -- WRITE
-                c0.barrier_dst_access = 96  -- READ/WRITE
+                c0.group_x = math.ceil(cfg.grid_cells / 256)
+                c0.barrier_src_stage  = vk_stage.comp
+                c0.barrier_dst_stage  = vk_stage.comp
+                c0.barrier_src_access = vk_access.shader_write
+                c0.barrier_dst_access = vk_access.shader_rw
 
                 -- PASS 1: Hash & Count
                 local c1 = current_comp_queue[1]

@@ -1,9 +1,10 @@
 local ffi = require("ffi")
 local bit = require("bit")
+local reg = require("registry")
+local vk_mem = reg.vk_mem
+local vk_struct = reg.vk_struct
 
--- ====================================================================
 -- CROSS-PLATFORM ALLOCATION BRIDGE (AVX2 Aligned Heap)
--- ====================================================================
 local is_windows = (ffi.os == "Windows")
 
 if is_windows then
@@ -50,7 +51,7 @@ local function FindSmartBufferMemory(vk, physicalDevice, typeFilter)
     vk.vkGetPhysicalDeviceMemoryProperties(physicalDevice, memProperties)
 
     -- Prioritize Host Visible + Coherent + Local (ReBAR)
-    local rebarFlags = bit.bor(1, 2, 4) -- DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT
+    local rebarFlags = bit.bor(vk_mem.device_local, vk_mem.host_visible, vk_mem.host_coherent)
     for i = 0, memProperties.memoryTypeCount - 1 do
         if bit.band(typeFilter, bit.lshift(1, i)) ~= 0 and bit.band(memProperties.memoryTypes[i].propertyFlags, rebarFlags) == rebarFlags then
             print("[MEMORY] ReBAR Supported! Streaming directly to VRAM.")
@@ -59,12 +60,12 @@ local function FindSmartBufferMemory(vk, physicalDevice, typeFilter)
     end
 
     -- Fallback: Force Write-Combining (Reject HOST_CACHED_BIT)
-    local stdFlags = bit.bor(2, 4) -- HOST_VISIBLE | HOST_COHERENT
-    local cachedFlag = 8           -- HOST_CACHED_BIT
+    local stdFlags = bit.bor(vk_mem.host_visible, vk_mem.host_coherent)
     for i = 0, memProperties.memoryTypeCount - 1 do
         local flags = memProperties.memoryTypes[i].propertyFlags
         local has_std = bit.band(flags, stdFlags) == stdFlags
-        local not_cached = bit.band(flags, cachedFlag) == 0
+        local not_cached = bit.band(flags, vk_mem.host_cached) == 0
+
         if bit.band(typeFilter, bit.lshift(1, i)) ~= 0 and has_std and not_cached then
             print("[MEMORY] ReBAR NOT found. Falling back to System RAM (Write-Combining).")
             return i
@@ -78,7 +79,7 @@ function Memory.CreateHostVisibleBuffer(name, cdef_type, element_count, usage_fl
     local byte_size = ffi.sizeof(cdef_type) * element_count
 
     local bufInfo = ffi.new("VkBufferCreateInfo", {
-        sType = 12, size = byte_size, usage = usage_flags, sharingMode = 0
+        sType = vk_struct.buffer_create, size = byte_size, usage = usage_flags, sharingMode = 0
     })
 
     local pBuffer = ffi.new("VkBuffer[1]")
@@ -89,7 +90,7 @@ function Memory.CreateHostVisibleBuffer(name, cdef_type, element_count, usage_fl
     vk.vkGetBufferMemoryRequirements(core_state.device, Memory.Buffers[name], memReqs)
 
     local allocInfo = ffi.new("VkMemoryAllocateInfo", {
-        sType = 5, allocationSize = memReqs.size,
+        sType = vk_struct.mem_alloc, allocationSize = memReqs.size,
         memoryTypeIndex = FindSmartBufferMemory(vk, core_state.physicalDevice, memReqs.memoryTypeBits)
     })
 

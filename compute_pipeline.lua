@@ -1,4 +1,6 @@
 local ffi = require("ffi")
+local reg = require("registry")
+local vk_struct, vk_shader = reg.vk_struct, reg.vk_shader_stage
 
 local ComputePipeline = {}
 
@@ -13,7 +15,7 @@ end
 local function CreateShaderModule(vk, device, filename)
     local compCode = ReadShaderFile(filename)
     local compInfo = ffi.new("VkShaderModuleCreateInfo", {
-        sType = 16, -- VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+        sType = vk_struct.shader_module_create,
         codeSize = string.len(compCode),
         pCode = ffi.cast("const uint32_t*", compCode)
     })
@@ -36,10 +38,10 @@ function ComputePipeline.Init(vk, device, pipelineLayout)
     local pipelineInfos = ffi.new("VkComputePipelineCreateInfo[6]")
 
     for i = 0, 5 do
-        pipelineInfos[i].sType = 29
+        pipelineInfos[i].sType = vk_struct.compute_pipeline_create
         pipelineInfos[i].layout = pipelineLayout
-        pipelineInfos[i].stage.sType = 18
-        pipelineInfos[i].stage.stage = 32
+        pipelineInfos[i].stage.sType = vk_struct.pipeline_shader_stage_create
+        pipelineInfos[i].stage.stage = vk_shader.comp
         pipelineInfos[i].stage.module = modules[i + 1]
         pipelineInfos[i].stage.pName = "main"
     end

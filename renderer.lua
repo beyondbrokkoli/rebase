@@ -1,8 +1,9 @@
 local ffi = require("ffi")
 local bit = require("bit")
-local math = require("math")
+local reg = require("registry")
+local vk_struct, vk_access, vk_stage = reg.vk_struct, reg.vk_access, reg.vk_stage
+local vk_layout, vk_image, vk_attachment = reg.vk_layout, reg.vk_image, reg.vk_attachment
 
--- ALIAS BRIDGE: Map KHR extension names to Core 1.3 definitions from parse.py
 ffi.cdef[[
     typedef VkRenderingAttachmentInfo VkRenderingAttachmentInfoKHR;
     typedef VkRenderingInfo VkRenderingInfoKHR;
@@ -14,18 +15,16 @@ local Renderer = {}
 function Renderer.InitSync(vk, device, frames_in_flight)
     print("[RENDERER] Forging Synchronization Primitives...");
 
-    local max_swapchain_images = 10;
-    local imageAvailable = ffi.new("VkSemaphore[?]", frames_in_flight); -- Best practice to match
-    local renderFinished = ffi.new("VkSemaphore[?]", frames_in_flight); -- FIX: Was max_swapchain_images
+    local imageAvailable = ffi.new("VkSemaphore[?]", frames_in_flight);
+    local renderFinished = ffi.new("VkSemaphore[?]", frames_in_flight);
     local inFlight = ffi.new("VkFence[?]", frames_in_flight);
 
-    local semInfo = ffi.new("VkSemaphoreCreateInfo", { sType = 9 })
+    local semInfo = ffi.new("VkSemaphoreCreateInfo", { sType = vk_struct.semaphore_create })
     local fenceInfo = ffi.new("VkFenceCreateInfo", {
-        sType = 8,
-        flags = 1
+        sType = vk_struct.fence_create,
+        flags = 1 -- VK_FENCE_CREATE_SIGNALED_BIT
     })
 
-    -- Consolidate creation into a single loop bound by frames_in_flight
     for i = 0, frames_in_flight - 1 do
         assert(vk.vkCreateSemaphore(device, semInfo, nil, imageAvailable + i) == 0)
         assert(vk.vkCreateSemaphore(device, semInfo, nil, renderFinished + i) == 0)
@@ -38,75 +37,75 @@ function Renderer.InitSync(vk, device, frames_in_flight)
         inFlight = inFlight
     }
 end
+
 function Renderer.AllocateFrameState(vk, device, width, height)
     local state = {}
 
     state.pImageIndex = ffi.new("uint32_t[1]")
-    state.cmdBeginInfo = ffi.new("VkCommandBufferBeginInfo", { sType = 42 })
+    state.cmdBeginInfo = ffi.new("VkCommandBufferBeginInfo", { sType = vk_struct.command_buffer_begin })
 
     state.computeBarrier = ffi.new("VkMemoryBarrier", {
-        sType = 46,
-        srcAccessMask = 64,  -- VK_ACCESS_SHADER_WRITE_BIT
-        dstAccessMask = 32   -- VK_ACCESS_SHADER_READ_BIT
+        sType = vk_struct.memory_barrier,
+        srcAccessMask = vk_access.shader_write,
+        dstAccessMask = vk_access.shader_read
     })
 
     state.colorBarrierIn = ffi.new("VkImageMemoryBarrier", {
-        sType = 45,
-        oldLayout = 0,
-        newLayout = 2,
+        sType = vk_struct.image_memory_barrier,
+        oldLayout = vk_layout.undefined,
+        newLayout = vk_layout.color_attachment_optimal,
         srcQueueFamilyIndex = 4294967295,
         dstQueueFamilyIndex = 4294967295,
-        subresourceRange = { aspectMask = 1, levelCount = 1, layerCount = 1 },
+        subresourceRange = { aspectMask = vk_image.aspect_color, levelCount = 1, layerCount = 1 },
         srcAccessMask = 0,
-        dstAccessMask = 256
+        dstAccessMask = vk_access.color_write
     })
 
     state.depthBarrierIn = ffi.new("VkImageMemoryBarrier", {
-        sType = 45,
-        oldLayout = 0,
-        newLayout = 3,
+        sType = vk_struct.image_memory_barrier,
+        oldLayout = vk_layout.undefined,
+        newLayout = vk_layout.depth_attachment_optimal,
         srcQueueFamilyIndex = 4294967295,
         dstQueueFamilyIndex = 4294967295,
-        subresourceRange = { aspectMask = 2, levelCount = 1, layerCount = 1 },
+        subresourceRange = { aspectMask = vk_image.aspect_depth, levelCount = 1, layerCount = 1 },
         srcAccessMask = 0,
-        dstAccessMask = 1024
+        dstAccessMask = vk_access.depth_write
     })
 
-    -- Explicitly allocate the array, then copy the structs by value
     state.preBarriers = ffi.new("VkImageMemoryBarrier[2]")
     state.preBarriers[0] = state.colorBarrierIn
     state.preBarriers[1] = state.depthBarrierIn
 
     state.colorBarrierOut = ffi.new("VkImageMemoryBarrier", {
-        sType = 45,
-        oldLayout = 2,
-        newLayout = 1000001002,
+        sType = vk_struct.image_memory_barrier,
+        oldLayout = vk_layout.color_attachment_optimal,
+        newLayout = vk_layout.present_src,
         srcQueueFamilyIndex = 4294967295,
         dstQueueFamilyIndex = 4294967295,
-        subresourceRange = { aspectMask = 1, levelCount = 1, layerCount = 1 },
-        srcAccessMask = 256,
+        subresourceRange = { aspectMask = vk_image.aspect_color, levelCount = 1, layerCount = 1 },
+        srcAccessMask = vk_access.color_write,
         dstAccessMask = 0
     })
 
     state.colorAttachment = ffi.new("VkRenderingAttachmentInfoKHR[1]")
-    state.colorAttachment[0].sType = ffi.cast("uint32_t", 1000044001)
-    state.colorAttachment[0].imageLayout = 2
-    state.colorAttachment[0].loadOp = 1 -- VK_ATTACHMENT_LOAD_OP_CLEAR
-    state.colorAttachment[0].storeOp = 0
+    state.colorAttachment[0].sType = vk_struct.rendering_attachment_info
+    state.colorAttachment[0].imageLayout = vk_layout.color_attachment_optimal
+    state.colorAttachment[0].loadOp = vk_attachment.load_clear
+    state.colorAttachment[0].storeOp = vk_attachment.store_store
     state.colorAttachment[0].clearValue.color.float32[0] = 0.01
     state.colorAttachment[0].clearValue.color.float32[1] = 0.01
     state.colorAttachment[0].clearValue.color.float32[2] = 0.02
     state.colorAttachment[0].clearValue.color.float32[3] = 1.0
 
     state.depthAttachment = ffi.new("VkRenderingAttachmentInfoKHR[1]")
-    state.depthAttachment[0].sType = ffi.cast("uint32_t", 1000044001)
-    state.depthAttachment[0].imageLayout = 3
-    state.depthAttachment[0].loadOp = 1 -- VK_ATTACHMENT_LOAD_OP_CLEAR
-    state.depthAttachment[0].storeOp = 1
+    state.depthAttachment[0].sType = vk_struct.rendering_attachment_info
+    state.depthAttachment[0].imageLayout = vk_layout.depth_attachment_optimal
+    state.depthAttachment[0].loadOp = vk_attachment.load_clear
+    state.depthAttachment[0].storeOp = vk_attachment.store_dont_care
     state.depthAttachment[0].clearValue.depthStencil.depth = 0.0
 
     state.renderInfo = ffi.new("VkRenderingInfoKHR[1]")
-    state.renderInfo[0].sType = ffi.cast("uint32_t", 1000044000)
+    state.renderInfo[0].sType = vk_struct.rendering_info
     state.renderInfo[0].renderArea.extent.width = width
     state.renderInfo[0].renderArea.extent.height = height
     state.renderInfo[0].layerCount = 1
@@ -119,18 +118,18 @@ function Renderer.AllocateFrameState(vk, device, width, height)
     state.offsets = ffi.new("VkDeviceSize[1]", {0})
 
     state.submitInfo = ffi.new("VkSubmitInfo", {
-        sType = 4,
+        sType = vk_struct.submit_info,
         waitSemaphoreCount = 1,
         commandBufferCount = 1,
         signalSemaphoreCount = 1
     })
 
-    state.waitStages = ffi.new("int32_t[1]", { 1024 })
+    state.waitStages = ffi.new("int32_t[1]", { vk_stage.color_out })
     state.submitInfo.pWaitDstStageMask = state.waitStages
     state.cmdPtr = ffi.new("VkCommandBuffer[1]")
 
     state.presentInfo = ffi.new("VkPresentInfoKHR", {
-        sType = 1000001001,
+        sType = vk_struct.present_info,
         waitSemaphoreCount = 1,
         swapchainCount = 1
     })
@@ -139,7 +138,6 @@ function Renderer.AllocateFrameState(vk, device, width, height)
     state.vkCmdEndRendering = ffi.cast("PFN_vkCmdEndRenderingKHR", vk.vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR"))
     assert(state.vkCmdBeginRendering ~= ffi.NULL and state.vkCmdEndRendering ~= ffi.NULL, "FATAL: KHR Dynamic Rendering Pointers Missing!")
 
-    -- GC-FREE HOISTED ALLOCATIONS
     state.pFence = ffi.new("VkFence[1]")
     state.pDescriptorSets = ffi.new("VkDescriptorSet[1]")
     state.pComputeBarrierArr = ffi.new("VkMemoryBarrier[1]")
@@ -151,11 +149,9 @@ function Renderer.AllocateFrameState(vk, device, width, height)
     state.pSwapchains = ffi.new("VkSwapchainKHR[1]")
     state.pSubmitInfos = ffi.new("VkSubmitInfo[1]")
 
-    -- 1. Slot the initialized structs into the FFI arrays
     state.pComputeBarrierArr[0] = state.computeBarrier
     state.pColorBarrierOutArr[0] = state.colorBarrierOut
 
-    -- 2. Cache Vulkan commands to bypass global table lookups
     state.vkCmdBindPipeline = vk.vkCmdBindPipeline
     state.vkCmdBindDescriptorSets = vk.vkCmdBindDescriptorSets
     state.vkCmdPushConstants = vk.vkCmdPushConstants

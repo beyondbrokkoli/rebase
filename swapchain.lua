@@ -1,4 +1,7 @@
 local ffi = require("ffi")
+local reg = require("registry")
+local vk_struct, vk_format, vk_image = reg.vk_struct, reg.vk_format, reg.vk_image
+local vk_swapchain, vk_result = reg.vk_swapchain, reg.vk_result
 
 local Swapchain = {}
 
@@ -7,11 +10,6 @@ function Swapchain.Init(vk, core_state, width, height, old_swapchain)
     local surfaceCaps = ffi.new("VkSurfaceCapabilitiesKHR")
     vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(core_state.physicalDevice, core_state.surface, surfaceCaps)
 
-    -- ========================================================
-    -- THE FIX: Zero-Extent Guard
-    -- If the OS minimizes or collapses the window during a resize,
-    -- the max extent becomes 0x0. We must abort swapchain creation.
-    -- ========================================================
     if surfaceCaps.maxImageExtent.width == 0 or surfaceCaps.maxImageExtent.height == 0 then
         print("[SWAPCHAIN WARNING] Surface extent is 0x0 (Minimized/Transitioning). Aborting rebuild.")
         return nil
@@ -28,36 +26,31 @@ function Swapchain.Init(vk, core_state, width, height, old_swapchain)
 
     local swapchainInfo = ffi.new("VkSwapchainCreateInfoKHR")
     ffi.fill(swapchainInfo, ffi.sizeof(swapchainInfo))
-    swapchainInfo.sType = 1000001000
+    swapchainInfo.sType = vk_struct.swapchain_create
     swapchainInfo.surface = core_state.surface
-
-    -- INJECT THE OLD SWAPCHAIN HERE
     swapchainInfo.oldSwapchain = old_swapchain or ffi.cast("VkSwapchainKHR", 0)
-
     swapchainInfo.minImageCount = surfaceCaps.minImageCount + 1
-    swapchainInfo.imageFormat = 50
-    swapchainInfo.imageColorSpace = 0
-    swapchainInfo.imageExtent.width = width     -- Now strictly validated & clamped
-    swapchainInfo.imageExtent.height = height   -- Now strictly validated & clamped
-
+    swapchainInfo.imageFormat = vk_format.b8g8r8a8_srgb
+    swapchainInfo.imageColorSpace = vk_swapchain.color_space_srgb_nonlinear
+    swapchainInfo.imageExtent.width = width
+    swapchainInfo.imageExtent.height = height
     swapchainInfo.imageArrayLayers = 1
-    swapchainInfo.imageUsage = 16 -- VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+    swapchainInfo.imageUsage = vk_image.usage_color_attachment
     swapchainInfo.preTransform = surfaceCaps.currentTransform
-    swapchainInfo.compositeAlpha = 1 -- VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-    swapchainInfo.presentMode = 2 -- VK_PRESENT_MODE_FIFO_KHR (VSync on)
-    swapchainInfo.clipped = 1 -- VK_TRUE
+    swapchainInfo.compositeAlpha = vk_swapchain.composite_alpha_opaque
+    swapchainInfo.presentMode = vk_swapchain.present_mode_fifo
+    swapchainInfo.clipped = 1
 
     local pSwapchain = ffi.new("VkSwapchainKHR[1]")
     local res = vk.vkCreateSwapchainKHR(core_state.device, swapchainInfo, nil, pSwapchain)
-    -- Gracefully back out of volatile WM resizes instead of fatal asserts
-    if res == -1000000001 then
+
+    if res == vk_result.error_out_of_date then
         print("[SWAPCHAIN WARNING] Surface volatile. Retrying next frame...")
         return nil
     end
-    assert(res == 0, "FATAL: Failed to create Swapchain! Error: " .. tonumber(res))
+    assert(res == vk_result.success, "FATAL: Failed to create Swapchain! Error: " .. tonumber(res))
     local swapchain = pSwapchain[0]
 
-    -- 3. Extract the Swapchain Images
     local pImageCount = ffi.new("uint32_t[1]")
     vk.vkGetSwapchainImagesKHR(core_state.device, swapchain, pImageCount, nil)
     local imageCount = pImageCount[0]
@@ -65,24 +58,21 @@ function Swapchain.Init(vk, core_state, width, height, old_swapchain)
     local images = ffi.new("VkImage[?]", imageCount)
     vk.vkGetSwapchainImagesKHR(core_state.device, swapchain, pImageCount, images)
 
-    -- 4. Create the Image Views
     local imageViews = ffi.new("VkImageView[?]", imageCount)
 
     for i = 0, imageCount - 1 do
         local viewInfo = ffi.new("VkImageViewCreateInfo")
         ffi.fill(viewInfo, ffi.sizeof(viewInfo))
 
-        viewInfo.sType = 15 -- VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+        viewInfo.sType = vk_struct.image_view_create
         viewInfo.image = images[i]
-        viewInfo.viewType = 1 -- VK_IMAGE_VIEW_TYPE_2D
-        viewInfo.format = 50 -- VK_FORMAT_B8G8R8A8_SRGB
-
-        viewInfo.subresourceRange.aspectMask = 1 -- VK_IMAGE_ASPECT_COLOR_BIT
+        viewInfo.viewType = vk_image.view_type_2d
+        viewInfo.format = vk_format.b8g8r8a8_srgb
+        viewInfo.subresourceRange.aspectMask = vk_image.aspect_color
         viewInfo.subresourceRange.levelCount = 1
         viewInfo.subresourceRange.layerCount = 1
 
-        -- Notice the pointer arithmetic (imageViews + i) to write directly to the array index!
-        assert(vk.vkCreateImageView(core_state.device, viewInfo, nil, imageViews + i) == 0)
+        assert(vk.vkCreateImageView(core_state.device, viewInfo, nil, imageViews + i) == vk_result.success)
     end
 
     print("[SWAPCHAIN] Created successfully with " .. tonumber(imageCount) .. " images!")
@@ -92,7 +82,7 @@ function Swapchain.Init(vk, core_state, width, height, old_swapchain)
         images = images,
         imageViews = imageViews,
         imageCount = imageCount,
-        format = 50,
+        format = vk_format.b8g8r8a8_srgb,
         extent = { width = width, height = height }
     }
 end

@@ -36,18 +36,40 @@ local function compile_engine(platform)
     print("   Target Platform: " .. string.upper(platform))
     print("========================================")
 
+    -- ==========================================
+    -- THE SSOT BRIDGE: Generate the GLSL Header
+    -- ==========================================
+    print("\n[0/X] Generating GLSL Single Source of Truth...")
+    local gen_cmd = 'luajit -e "require(\'shader_gen\').generate(\'registry.glsl\')"'
+    
+    -- THE FIX: Use your native run_cmd wrapper!
+    if not run_cmd(gen_cmd) then
+        print("ERROR: Failed to generate registry.glsl!")
+        os.exit(1)
+    end
+
+    -- Centralized Shader List
+    local shaders = {
+        {"render.vert", "render_vert.spv"},
+        {"render.frag", "render_frag.spv"},
+        {"clear.comp", "clear_comp.spv"},
+        {"hash.comp", "hash_comp.spv"},
+        {"scan_local.comp", "scan_local_comp.spv"},
+        {"scan_group.comp", "scan_group_comp.spv"},
+        {"scan_add.comp", "scan_add_comp.spv"},
+        {"reorder.comp", "reorder_comp.spv"}
+    }
+
     if platform == "linux" then
         -- LINUX BUILD PIPELINE
         print("\n[1/3] Compiling SPIR-V Shaders...")
-        os.execute("glslc render.vert -o render_vert.spv")
-        os.execute("glslc render.frag -o render_frag.spv")
-
-        os.execute("glslc clear.comp -o clear_comp.spv")
-        os.execute("glslc hash.comp -o hash_comp.spv")
-        os.execute("glslc scan_local.comp -o scan_local_comp.spv")
-        os.execute("glslc scan_group.comp -o scan_group_comp.spv")
-        os.execute("glslc scan_add.comp -o scan_add_comp.spv")
-        os.execute("glslc reorder.comp -o reorder_comp.spv")
+        for _, s in ipairs(shaders) do
+            local cmd = string.format("glslc %s -o %s -I.", s[1], s[2])
+            if not run_cmd(cmd) then
+                print("ERROR: Failed to compile " .. s[1])
+                os.exit(1)
+            end
+        end
 
         print("\n[2/3] Compiling libvx_math.so (AVX2 Worker Pool) ...")
         local linux_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -fPIC -pthread vx_math.c -o libvx_math.so -lm"
@@ -67,15 +89,15 @@ local function compile_engine(platform)
         -- WINDOWS BUILD PIPELINE
         print("\n[1/4] Compiling SPIR-V Shaders...")
         local glslc = VULKAN_SDK_PATH .. "/Bin/glslc.exe"
-        os.execute(glslc .. " render.vert -o render_vert.spv")
-        os.execute(glslc .. " render.frag -o render_frag.spv")
-
-        os.execute("glslc clear.comp -o clear_comp.spv")
-        os.execute("glslc hash.comp -o hash_comp.spv")
-        os.execute("glslc scan_local.comp -o scan_local_comp.spv")
-        os.execute("glslc scan_group.comp -o scan_group_comp.spv")
-        os.execute("glslc scan_add.comp -o scan_add_comp.spv")
-        os.execute("glslc reorder.comp -o reorder_comp.spv")
+        
+        for _, s in ipairs(shaders) do
+            -- Reverted to your unquoted glslc path string!
+            local cmd = string.format('%s %s -o %s -I.', glslc, s[1], s[2])
+            if not run_cmd(cmd) then
+                print("ERROR: Failed to compile " .. s[1])
+                os.exit(1)
+            end
+        end
 
         print("\n[2/4] Compiling vx_math.dll (AVX2 Worker Pool) ...")
         local win_build_vibemath = "gcc -O3 -march=x86-64-v3 -shared -pthread vx_math.c -o vx_math.dll -lm"
@@ -95,9 +117,6 @@ local function compile_engine(platform)
             os.exit(1)
         end
 
-        -- ==========================================
-        -- AUTOMATIC DEPENDENCY PACKING
-        -- ==========================================
         print("\n[4/4] Packing Windows Dependencies (DLLs)...")
         copy_file("C:/msys64/mingw64/bin/glfw3.dll", "glfw3.dll")
         copy_file("C:/msys64/mingw64/bin/lua51.dll", "lua51.dll")
@@ -212,7 +231,7 @@ for _, src in ipairs(order) do
             minified_content = minify_lua(content)
         end
 
---        print("@@@ FILE: " .. src .. " @@@\n" .. minified_content)
+        print("@@@ FILE: " .. src .. " @@@\n" .. minified_content)
         f:close()
     end
 end

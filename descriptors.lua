@@ -1,30 +1,26 @@
 local ffi = require("ffi")
 local bit = require("bit")
+local reg = require("registry")
+local vk_desc, vk_struct, vk_shader = reg.vk_desc, reg.vk_struct, reg.vk_shader_stage
 
 local Descriptors = {}
 
 function Descriptors.Init(vk, device, master_gpu_buffer)
     print("[DESCRIPTORS] Wiring Master VRAM Arena as a Unified SSBO...")
 
-    -- THE FIX: Adding Fragment Stage Access
-    local STAGE_VERTEX = 1
-    local STAGE_FRAGMENT = 16    -- <--- ADDED: VK_SHADER_STAGE_FRAGMENT_BIT
-    local STAGE_COMPUTE = 32
-    local STAGE_ALL = bit.bor(STAGE_VERTEX, STAGE_COMPUTE, STAGE_FRAGMENT)
+    local STAGE_ALL = bit.bor(vk_shader.vert, vk_shader.comp, vk_shader.frag)
 
     -- 1. Descriptor Set Layout Binding (Single SSBO)
     local ssboBinding = ffi.new("VkDescriptorSetLayoutBinding[1]")
     ssboBinding[0].binding = 0
-    ssboBinding[0].descriptorType = 7 -- VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+    ssboBinding[0].descriptorType = vk_desc.ssbo
     ssboBinding[0].descriptorCount = 1
-
-    -- Bonus: This now allows the Fragment shader to read the MasterBuffer too!
     ssboBinding[0].stageFlags = STAGE_ALL
     ssboBinding[0].pImmutableSamplers = nil
 
     local layoutInfo = ffi.new("VkDescriptorSetLayoutCreateInfo")
     ffi.fill(layoutInfo, ffi.sizeof(layoutInfo))
-    layoutInfo.sType = 32 
+    layoutInfo.sType = vk_struct.desc_set_layout_create
     layoutInfo.bindingCount = 1
     layoutInfo.pBindings = ssboBinding
 
@@ -34,16 +30,16 @@ function Descriptors.Init(vk, device, master_gpu_buffer)
 
     -- 2. Push Constant Range (128-Byte Router)
     local pushRange = ffi.new("VkPushConstantRange[1]")
-    
+
     -- THE FIX: Grant access to Vertex, Compute, AND Fragment
-    pushRange[0].stageFlags = STAGE_ALL 
+    pushRange[0].stageFlags = STAGE_ALL
     pushRange[0].offset = 0
     pushRange[0].size = 128
 
     -- 3. Pipeline Layout (Unified Router)
     local pipeLayoutInfo = ffi.new("VkPipelineLayoutCreateInfo")
     ffi.fill(pipeLayoutInfo, ffi.sizeof(pipeLayoutInfo))
-    pipeLayoutInfo.sType = 30 -- VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+    pipeLayoutInfo.sType = vk_struct.pipeline_layout_create
     pipeLayoutInfo.setLayoutCount = 1
     pipeLayoutInfo.pSetLayouts = ffi.new("VkDescriptorSetLayout[1]", {unifiedSetLayout})
     pipeLayoutInfo.pushConstantRangeCount = 1
@@ -55,12 +51,12 @@ function Descriptors.Init(vk, device, master_gpu_buffer)
 
     -- 4. Descriptor Pool
     local poolSize = ffi.new("VkDescriptorPoolSize[1]")
-    poolSize[0].type = 7 -- VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+    poolSize[0].type = vk_desc.ssbo
     poolSize[0].descriptorCount = 1
 
     local poolInfo = ffi.new("VkDescriptorPoolCreateInfo")
     ffi.fill(poolInfo, ffi.sizeof(poolInfo))
-    poolInfo.sType = 33 -- VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+    poolInfo.sType = vk_struct.desc_pool_create
     poolInfo.maxSets = 1
     poolInfo.poolSizeCount = 1
     poolInfo.pPoolSizes = poolSize
@@ -72,7 +68,7 @@ function Descriptors.Init(vk, device, master_gpu_buffer)
     -- 5. Allocate and Update Descriptor Set
     local allocInfo = ffi.new("VkDescriptorSetAllocateInfo")
     ffi.fill(allocInfo, ffi.sizeof(allocInfo))
-    allocInfo.sType = 34 -- VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+    allocInfo.sType = vk_struct.desc_set_alloc
     allocInfo.descriptorPool = descriptorPool
     allocInfo.descriptorSetCount = 1
     allocInfo.pSetLayouts = ffi.new("VkDescriptorSetLayout[1]", {unifiedSetLayout})
@@ -88,11 +84,11 @@ function Descriptors.Init(vk, device, master_gpu_buffer)
 
     local write = ffi.new("VkWriteDescriptorSet[1]")
     ffi.fill(write, ffi.sizeof(write))
-    write[0].sType = 35 -- VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+    write[0].sType = vk_struct.write_desc_set
     write[0].dstSet = pSet[0]
     write[0].dstBinding = 0
     write[0].descriptorCount = 1
-    write[0].descriptorType = 7
+    write[0].descriptorType = vk_desc.ssbo
     write[0].pBufferInfo = bufInfo
 
     vk.vkUpdateDescriptorSets(device, 1, write, 0, nil)

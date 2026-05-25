@@ -1,16 +1,19 @@
 local ffi = require("ffi")
 local bit = require("bit")
+local reg = require("registry")
+local vk_struct, vk_shader = reg.vk_struct, reg.vk_shader_stage
+local vk_state, vk_pipeline, vk_dynamic = reg.vk_state, reg.vk_pipeline, reg.vk_dynamic
+local vk_format, vk_image, vk_layout = reg.vk_format, reg.vk_image, reg.vk_layout
 
 local GraphicsPipeline = {}
 
--- DEFERRED DELETION QUEUE (Pre-allocated)
 local DELETION_QUEUE_SIZE = 16
 local deletion_queue = {}
 for i = 0, DELETION_QUEUE_SIZE - 1 do
     deletion_queue[i] = {
         active = false, frame_target = 0,
         geom = nil, points = nil,
-        vert = nil, frag = nil  -- REPLACED the 4 old shader pointers
+        vert = nil, frag = nil
     }
 end
 local d_head = 0
@@ -21,13 +24,10 @@ function GraphicsPipeline.PumpDeletionQueue(vk, core_state, current_frame)
 
     while d_tail ~= d_head do
         local item = deletion_queue[d_tail]
-        if current_frame < item.frame_target then
-            break
-        end
+        if current_frame < item.frame_target then break end
 
         vk.vkDestroyPipeline(device, item.geom, nil)
         vk.vkDestroyPipeline(device, item.points, nil)
-        -- Only two modules to destroy now!
         if item.vert ~= nil then vk.vkDestroyShaderModule(device, item.vert, nil) end
         if item.frag ~= nil then vk.vkDestroyShaderModule(device, item.frag, nil) end
 
@@ -46,101 +46,102 @@ end
 
 local function createShaderModule(vk, device, code)
     local info = ffi.new("VkShaderModuleCreateInfo", {
-        sType = 16, codeSize = string.len(code), pCode = ffi.cast("const uint32_t*", code)
+        sType = vk_struct.shader_module_create, codeSize = string.len(code), pCode = ffi.cast("const uint32_t*", code)
     })
     local pMod = ffi.new("VkShaderModule[1]")
     assert(vk.vkCreateShaderModule(device, info, nil, pMod) == 0)
     return pMod[0]
 end
 
--- PIPELINE BUILDER (Reusable for Hotswapping)
 local function BuildPipelines(vk, device, layout, colorFormat, vertModule, fragModule)
-    -- We only need ONE stage array now, shared by both pipelines!
     local shaderStages = ffi.new("VkPipelineShaderStageCreateInfo[2]")
-    shaderStages[0].sType = 18; shaderStages[0].stage = 1;  shaderStages[0].module = vertModule; shaderStages[0].pName = "main"
-    shaderStages[1].sType = 18; shaderStages[1].stage = 16; shaderStages[1].module = fragModule; shaderStages[1].pName = "main"
+    shaderStages[0].sType = vk_struct.pipeline_shader_stage_create; shaderStages[0].stage = vk_shader.vert; shaderStages[0].module = vertModule; shaderStages[0].pName = "main"
+    shaderStages[1].sType = vk_struct.pipeline_shader_stage_create; shaderStages[1].stage = vk_shader.frag; shaderStages[1].module = fragModule; shaderStages[1].pName = "main"
 
-    local vertexInputInfo = ffi.new("VkPipelineVertexInputStateCreateInfo", { sType = 19 })
-    local inputAssembly = ffi.new("VkPipelineInputAssemblyStateCreateInfo", { sType = 20 })
-    local viewportState = ffi.new("VkPipelineViewportStateCreateInfo", { sType = 22, viewportCount = 1, scissorCount = 1 })
+    local vertexInputInfo = ffi.new("VkPipelineVertexInputStateCreateInfo", { sType = vk_struct.pipeline_vertex_input_state_create })
+    local inputAssembly = ffi.new("VkPipelineInputAssemblyStateCreateInfo", { sType = vk_struct.pipeline_input_assembly_state_create })
+    local viewportState = ffi.new("VkPipelineViewportStateCreateInfo", { sType = vk_struct.pipeline_viewport_state_create, viewportCount = 1, scissorCount = 1 })
 
     local rasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo", {
-        sType = 23, polygonMode = 0, lineWidth = 1.0, cullMode = 1, frontFace = 0
+        sType = vk_struct.pipeline_rasterization_state_create, polygonMode = vk_pipeline.poly_mode_fill, lineWidth = 1.0, cullMode = vk_pipeline.cull_back, frontFace = vk_pipeline.face_ccw
     })
-    local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo", { sType = 24, rasterizationSamples = 1 })
+    local multisampling = ffi.new("VkPipelineMultisampleStateCreateInfo", { sType = vk_struct.pipeline_multisample_state_create, rasterizationSamples = vk_image.sample_count_1 })
     local depthStencil = ffi.new("VkPipelineDepthStencilStateCreateInfo", {
-        sType = 25, depthTestEnable = 1, depthWriteEnable = 1, depthCompareOp = 4
+        sType = vk_struct.pipeline_depth_stencil_state_create, depthTestEnable = vk_state.depth_on, depthWriteEnable = vk_state.depth_on, depthCompareOp = vk_state.cmp_le
     })
 
     local colorBlendAttachment = ffi.new("VkPipelineColorBlendAttachmentState[1]")
-    colorBlendAttachment[0].colorWriteMask = 15; colorBlendAttachment[0].srcColorBlendFactor = 6
-    colorBlendAttachment[0].dstColorBlendFactor = 1; colorBlendAttachment[0].srcAlphaBlendFactor = 1
+    colorBlendAttachment[0].colorWriteMask = vk_pipeline.color_mask_rgba
+    colorBlendAttachment[0].srcColorBlendFactor = vk_pipeline.blend_src_alpha
+    colorBlendAttachment[0].dstColorBlendFactor = vk_pipeline.blend_one
+    colorBlendAttachment[0].srcAlphaBlendFactor = vk_pipeline.blend_one
 
     local colorBlending = ffi.new("VkPipelineColorBlendStateCreateInfo", {
-        sType = 26, attachmentCount = 1, pAttachments = colorBlendAttachment
+        sType = vk_struct.pipeline_color_blend_state_create, attachmentCount = 1, pAttachments = colorBlendAttachment
     })
 
-    local dynamicStates = ffi.new("VkDynamicState[8]", { 0, 1, 1000267000, 1000267001, 1000267002, 1000267006, 1000267007, 1000267008 })
+    local dynamicStates = ffi.new("VkDynamicState[8]", {
+        vk_dynamic.viewport, vk_dynamic.scissor, vk_dynamic.cull_mode_ext,
+        vk_dynamic.front_face_ext, vk_dynamic.primitive_topo_ext, vk_dynamic.depth_test_ext,
+        vk_dynamic.depth_write_ext, vk_dynamic.depth_compare_op_ext
+    })
+
     local dynamicStateInfo = ffi.new("VkPipelineDynamicStateCreateInfo", {
-        sType = 27, dynamicStateCount = 8, pDynamicStates = dynamicStates
+        sType = vk_struct.pipeline_dynamic_state_create, dynamicStateCount = 8, pDynamicStates = dynamicStates
     })
 
     local colorFormats = ffi.new("int32_t[1]", {colorFormat})
     local pipelineRenderingInfo = ffi.new("VkPipelineRenderingCreateInfo", {
-        sType = 1000044002, colorAttachmentCount = 1, pColorAttachmentFormats = colorFormats, depthAttachmentFormat = 126
+        sType = vk_struct.pipeline_rendering_create, colorAttachmentCount = 1, pColorAttachmentFormats = colorFormats, depthAttachmentFormat = vk_format.d32_sfloat
     })
 
     local pipelineInfo = ffi.new("VkGraphicsPipelineCreateInfo[1]")
-    pipelineInfo[0].sType = 28; pipelineInfo[0].pNext = pipelineRenderingInfo
+    pipelineInfo[0].sType = vk_struct.graphics_pipeline_create; pipelineInfo[0].pNext = pipelineRenderingInfo
     pipelineInfo[0].stageCount = 2; pipelineInfo[0].pVertexInputState = vertexInputInfo
     pipelineInfo[0].pInputAssemblyState = inputAssembly; pipelineInfo[0].pViewportState = viewportState
     pipelineInfo[0].pRasterizationState = rasterizer; pipelineInfo[0].pMultisampleState = multisampling
     pipelineInfo[0].pDepthStencilState = depthStencil; pipelineInfo[0].pColorBlendState = colorBlending
     pipelineInfo[0].pDynamicState = dynamicStateInfo; pipelineInfo[0].layout = layout
-
-    -- Bind our unified shader stages
     pipelineInfo[0].pStages = shaderStages
 
-    -- Compile Geometry Pipeline (Topology: TRIANGLE_LIST)
-    inputAssembly.topology = 3
+    inputAssembly.topology = vk_state.topo_tri
     local pGeomPipeline = ffi.new("VkPipeline[1]")
     assert(vk.vkCreateGraphicsPipelines(device, nil, 1, pipelineInfo, nil, pGeomPipeline) == 0)
 
-    -- Compile Point Pipeline (Topology: POINT_LIST)
-    inputAssembly.topology = 0
+    inputAssembly.topology = vk_state.topo_point
     local pointRasterizer = ffi.new("VkPipelineRasterizationStateCreateInfo")
     ffi.copy(pointRasterizer, rasterizer, ffi.sizeof(rasterizer))
-    pointRasterizer.cullMode = 0
+    pointRasterizer.cullMode = vk_state.cull_none
     pipelineInfo[0].pRasterizationState = pointRasterizer
+    colorBlendAttachment[0].blendEnable = 1
 
     local pPointsPipeline = ffi.new("VkPipeline[1]")
     assert(vk.vkCreateGraphicsPipelines(device, nil, 1, pipelineInfo, nil, pPointsPipeline) == 0)
 
     return pGeomPipeline[0], pPointsPipeline[0]
 end
+
 function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, colorFormat)
     print("[GRAPHICS] Building Reverse-Z Depth Buffer and Shader Modules...")
     local device = core_state.device
 
-    -- 1. Create Depth Image (The Z-Buffer)
     local dImgInfo = ffi.new("VkImageCreateInfo")
     ffi.fill(dImgInfo, ffi.sizeof(dImgInfo))
-    dImgInfo.sType = 14 -- VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-    dImgInfo.imageType = 1 -- VK_IMAGE_TYPE_2D
+    dImgInfo.sType = vk_struct.image_create
+    dImgInfo.imageType = vk_image.type_2d
     dImgInfo.extent.width = width
     dImgInfo.extent.height = height
     dImgInfo.extent.depth = 1
     dImgInfo.mipLevels = 1
     dImgInfo.arrayLayers = 1
-    dImgInfo.format = 126 -- VK_FORMAT_D32_SFLOAT
-    dImgInfo.tiling = 0 -- VK_IMAGE_TILING_OPTIMAL
-    dImgInfo.initialLayout = 0 -- VK_IMAGE_LAYOUT_UNDEFINED
-    dImgInfo.usage = 32 -- VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-    dImgInfo.samples = 1 -- VK_SAMPLE_COUNT_1_BIT
+    dImgInfo.format = vk_format.d32_sfloat
+    dImgInfo.tiling = vk_image.tiling_optimal
+    dImgInfo.initialLayout = vk_layout.undefined
+    dImgInfo.usage = vk_image.usage_depth_attachment
+    dImgInfo.samples = vk_image.sample_count_1
 
     local pDepthImage = ffi.new("VkImage[1]")
     assert(vk.vkCreateImage(device, dImgInfo, nil, pDepthImage) == 0)
-    local depthImage = pDepthImage[0]
 
     local memReqs = ffi.new("VkMemoryRequirements")
     vk.vkGetImageMemoryRequirements(device, pDepthImage[0], memReqs)
@@ -152,37 +153,30 @@ function GraphicsPipeline.Init(vk, core_state, width, height, pipelineLayout, co
             memoryTypeIndex = i; break
         end
     end
-    local dAllocInfo = ffi.new("VkMemoryAllocateInfo", { sType = 5, allocationSize = memReqs.size, memoryTypeIndex = memoryTypeIndex })
+
+    local dAllocInfo = ffi.new("VkMemoryAllocateInfo", { sType = vk_struct.mem_alloc, allocationSize = memReqs.size, memoryTypeIndex = memoryTypeIndex })
     local pDepthMemory = ffi.new("VkDeviceMemory[1]"); assert(vk.vkAllocateMemory(device, dAllocInfo, nil, pDepthMemory) == 0)
     assert(vk.vkBindImageMemory(device, pDepthImage[0], pDepthMemory[0], 0) == 0)
 
     local dViewInfo = ffi.new("VkImageViewCreateInfo", {
-        sType = 15, image = pDepthImage[0], viewType = 1, format = 126,
-        subresourceRange = { aspectMask = 2, levelCount = 1, layerCount = 1 }
+        sType = vk_struct.image_view_create, image = pDepthImage[0], viewType = vk_image.view_type_2d, format = vk_format.d32_sfloat,
+        subresourceRange = { aspectMask = vk_image.aspect_depth, levelCount = 1, layerCount = 1 }
     })
     local pDepthView = ffi.new("VkImageView[1]"); assert(vk.vkCreateImageView(device, dViewInfo, nil, pDepthView) == 0)
 
-    -- THE FIX: Unified Module Load
     local unifiedVert = createShaderModule(vk, device, ReadShaderFile("render_vert.spv"))
     local unifiedFrag = createShaderModule(vk, device, ReadShaderFile("render_frag.spv"))
-
     local pipeGeom, pipePoints = BuildPipelines(vk, device, pipelineLayout, colorFormat, unifiedVert, unifiedFrag)
 
     return {
         depthImage = pDepthImage[0], depthMemory = pDepthMemory[0], depthImageView = pDepthView[0],
-        vert = unifiedVert, frag = unifiedFrag,  -- Unified modules
-        pipelineLayout = pipelineLayout,
-        colorFormat = colorFormat,
-        pipeline_geom = pipeGeom,
-        pipeline_points = pipePoints
+        vert = unifiedVert, frag = unifiedFrag, pipelineLayout = pipelineLayout,
+        colorFormat = colorFormat, pipeline_geom = pipeGeom, pipeline_points = pipePoints
     }
 end
 
--- THE HOTSWAP ROUTINE
 function GraphicsPipeline.HotReloadShaders(vk, core_state, gfx_state, current_frame)
     local device = core_state.device
-
-    -- 1. Enqueue the current pipelines for safe deferred destruction
     local item = deletion_queue[d_head]
     item.active = true
     item.frame_target = current_frame + 4
@@ -190,17 +184,12 @@ function GraphicsPipeline.HotReloadShaders(vk, core_state, gfx_state, current_fr
     item.points = gfx_state.pipeline_points
     item.vert = gfx_state.vert
     item.frag = gfx_state.frag
-
     d_head = (d_head + 1) % DELETION_QUEUE_SIZE
 
-    -- 2. Compile New Unified Modules
     local new_vert = createShaderModule(vk, device, ReadShaderFile("render_vert.spv"))
     local new_frag = createShaderModule(vk, device, ReadShaderFile("render_frag.spv"))
-
-    -- 3. Forge New Pipelines
     local new_geom, new_points = BuildPipelines(vk, device, gfx_state.pipelineLayout, gfx_state.colorFormat, new_vert, new_frag)
 
-    -- 4. Overwrite state
     gfx_state.pipeline_geom = new_geom
     gfx_state.pipeline_points = new_points
     gfx_state.vert = new_vert
@@ -212,7 +201,6 @@ function GraphicsPipeline.Destroy(vk, core_state, gfx_state)
     if not gfx_state then return end
     local device = type(core_state) == "table" and core_state.device or core_state
 
-    -- Force clear the deletion queue without frame checks
     while d_tail ~= d_head do
         local item = deletion_queue[d_tail]
         vk.vkDestroyPipeline(device, item.geom, nil)
@@ -232,4 +220,3 @@ function GraphicsPipeline.Destroy(vk, core_state, gfx_state)
 end
 
 return GraphicsPipeline
-

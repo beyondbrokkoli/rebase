@@ -2,6 +2,11 @@ local ffi = require("ffi")
 local bit = require("bit")
 require("vulkan_headers")
 
+local reg = require("registry")
+local cfg = reg.cfg
+local vk_struct = reg.vk_struct
+local vk_queue = reg.vk_queue
+
 ffi.cdef[[
     const char** vx_sys_glfw_extensions(uint32_t* count);
     void vx_sys_inject_validation(void* instance);
@@ -32,52 +37,67 @@ local core = {}
 function core.create_instance()
     print("[LUA] Initializing Vulkan Core (Instance Generation)...")
 
-    -- 1. Ask C for GLFW Extensions natively!
+    -- 1. Ask C for GLFW Extensions natively
     local pCount = ffi.new("uint32_t[1]")
     local glfwExtensions = ffi.C.vx_sys_glfw_extensions(pCount)
     local exts_count = pCount[0]
 
-    -- 1.5. Splice the arrays: GLFW Extensions + Debug Utils + Physical Device Props
-    local total_exts = exts_count + 2
-    local instanceExtensions = ffi.new("const char*[?]", total_exts)
+    -- 2. Dynamically build the extension list based on Validation state
+    local total_exts = exts_count + 1 -- Base: GLFW + get_physical_device_properties2
+    if cfg.use_validation == 1 then
+        total_exts = total_exts + 1   -- Add space for debug_utils
+    end
 
+    local instanceExtensions = ffi.new("const char*[?]", total_exts)
     for i = 0, exts_count - 1 do
         instanceExtensions[i] = glfwExtensions[i]
     end
 
-    -- Append the TWO Instance extensions
-    instanceExtensions[exts_count] = "VK_EXT_debug_utils"
-    instanceExtensions[exts_count + 1] = "VK_KHR_get_physical_device_properties2"
+    local ext_idx = exts_count
+    instanceExtensions[ext_idx] = "VK_KHR_get_physical_device_properties2"
+    ext_idx = ext_idx + 1
 
+    -- 3. Configure Validation Layers & Debug Extensions
+    local validationLayers = nil
+    local layerCount = 0
+
+    if cfg.use_validation == 1 then
+        instanceExtensions[ext_idx] = "VK_EXT_debug_utils"
+        validationLayers = ffi.new("const char*[1]", {"VK_LAYER_KHRONOS_validation"})
+        layerCount = 1
+        print("[LUA] Validation Layers ENABLED.")
+    else
+        print("[LUA] Validation Layers DISABLED. Running raw.")
+    end
+
+    -- 4. Build the Instance Info
     local appInfo = ffi.new("VkApplicationInfo", {
-        sType = 0, -- VK_STRUCTURE_TYPE_APPLICATION_INFO
+        sType = vk_struct.app_info,
         pApplicationName = "VX Engine Runtime",
-        apiVersion = 4206592 -- VK_MAKE_API_VERSION(0, 1, 3, 0)
+        apiVersion = cfg.vk_api_version
     })
-    -- 2.5 Define the Validation Layers
-    local validationLayers = ffi.new("const char*[1]", {"VK_LAYER_KHRONOS_validation"})
 
-    -- 3. Build the Instance Info
     local createInfo = ffi.new("VkInstanceCreateInfo", {
-        sType = 1, -- VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
+        sType = vk_struct.instance_create,
         pApplicationInfo = appInfo,
         enabledExtensionCount = total_exts,
         ppEnabledExtensionNames = instanceExtensions,
-        enabledLayerCount = 1,
+        enabledLayerCount = layerCount,
         ppEnabledLayerNames = validationLayers
     })
 
-    -- 4. Create the Instance
+    -- 5. Create the Instance
     local pInstance = ffi.new("VkInstance[1]")
     local res = vk.vkCreateInstance(createInfo, nil, pInstance)
     assert(res == 0, "FATAL: vkCreateInstance failed!")
     local instance = pInstance[0]
     print("[LUA] Vulkan Instance Created!")
 
-    -- Optional Validation Layer injection (Requires it to exist in main.c)
-    ffi.C.vx_sys_inject_validation(instance)
+    -- Inject C-side validation message routing if enabled
+    if cfg.use_validation == 1 then
+        ffi.C.vx_sys_inject_validation(instance)
+    end
 
-    -- Return the base state so main.lua can pass the instance to C and yield
     return {
         vk = vk,
         instance = instance
@@ -91,7 +111,6 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     local vk = vk_state.vk
     local instance = vk_state.instance
 
-    -- 5. Cast the raw pointer from C back into a VkSurfaceKHR
     local surface = ffi.cast("VkSurfaceKHR", surface_ptr)
     vk_state.surface = surface
     print("[LUA] Window Surface Linked from Main Thread!")
@@ -102,7 +121,7 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     local pDevices = ffi.new("VkPhysicalDevice[?]", pDeviceCount[0])
     vk.vkEnumeratePhysicalDevices(instance, pDeviceCount, pDevices)
 
-    local physicalDevice = pDevices[0] -- Just grab the first GPU for now
+    local physicalDevice = pDevices[0]
     vk_state.physicalDevice = physicalDevice
     print("[LUA] Hardware GPU Selected!")
 
@@ -114,8 +133,7 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
 
     local qIndex = -1
     for i = 0, pQueueFamilyCount[0] - 1 do
-        -- VK_QUEUE_GRAPHICS_BIT is 1. (It guarantees Compute support too!)
-        if bit.band(queueFamilies[i].queueFlags, 1) ~= 0 then
+        if bit.band(queueFamilies[i].queueFlags, vk_queue.graphics) ~= 0 then
             qIndex = i
             break
         end
@@ -126,13 +144,12 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     -- 8. Create the Logical Device
     local queuePriority = ffi.new("float[1]", 1.0)
     local queueCreateInfo = ffi.new("VkDeviceQueueCreateInfo", {
-        sType = 2, -- VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
+        sType = vk_struct.device_queue_create,
         queueFamilyIndex = qIndex,
         queueCount = 1,
         pQueuePriorities = queuePriority
     })
 
-    -- Enable Swapchain, Dynamic Rendering, and the entire dependency tree!
     local deviceExtensions = ffi.new("const char*[8]", {
         "VK_KHR_swapchain",
         "VK_KHR_dynamic_rendering",
@@ -140,27 +157,27 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
         "VK_KHR_create_renderpass2",
         "VK_KHR_multiview",
         "VK_KHR_maintenance2",
-        "VK_EXT_extended_dynamic_state", -- The missing extension
-        "VK_EXT_extended_dynamic_state2" -- Depth states live here!
+        "VK_EXT_extended_dynamic_state",
+        "VK_EXT_extended_dynamic_state2"
     })
 
     -- 1. Dynamic Rendering Feature
     local dynamicRendering = ffi.new("VkPhysicalDeviceDynamicRenderingFeatures")
     ffi.fill(dynamicRendering, ffi.sizeof(dynamicRendering))
-    dynamicRendering.sType = 1000044003
+    dynamicRendering.sType = vk_struct.dynamic_rendering_features
     dynamicRendering.dynamicRendering = 1
 
     -- 2. Extended Dynamic State 1 Feature
     local extDynamicState = ffi.new("VkPhysicalDeviceExtendedDynamicStateFeaturesEXT")
     ffi.fill(extDynamicState, ffi.sizeof(extDynamicState))
-    extDynamicState.sType = 1000267000
+    extDynamicState.sType = vk_struct.extended_dynamic_state_features
     extDynamicState.pNext = dynamicRendering
     extDynamicState.extendedDynamicState = 1
 
-    -- 3. Extended Dynamic State 2 Feature (THE FIX)
+    -- 3. Extended Dynamic State 2 Feature
     local extDynamicState2 = ffi.new("VkPhysicalDeviceExtendedDynamicState2FeaturesEXT")
     ffi.fill(extDynamicState2, ffi.sizeof(extDynamicState2))
-    extDynamicState2.sType = 1000377000 -- VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
+    extDynamicState2.sType = vk_struct.extended_dynamic_state2_features
     extDynamicState2.pNext = extDynamicState
     extDynamicState2.extendedDynamicState2 = 1
 
@@ -171,8 +188,8 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     -- 4. Device Creation
     local deviceCreateInfo = ffi.new("VkDeviceCreateInfo")
     ffi.fill(deviceCreateInfo, ffi.sizeof(deviceCreateInfo))
-    deviceCreateInfo.sType = 3
-    deviceCreateInfo.pNext = extDynamicState2 -- Pass the head of the chain!
+    deviceCreateInfo.sType = vk_struct.device_create
+    deviceCreateInfo.pNext = extDynamicState2
     deviceCreateInfo.queueCreateInfoCount = 1
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfo
     deviceCreateInfo.enabledExtensionCount = 8
@@ -191,9 +208,6 @@ function core.finalize_device_and_swapchain(vk_state, surface_ptr)
     vk.vkGetDeviceQueue(device, qIndex, 0, pQueue)
     vk_state.queue = pQueue[0]
 
-    print("[DEBUG] Device Pointer in core: " .. tostring(device))
-
-    -- We pass the fully loaded state back to main.lua
     return vk_state
 end
 
@@ -202,19 +216,18 @@ function core.Destroy(vk_state)
     print("[TEARDOWN] Shutting down Vulkan Core...")
     local vk = vk_state.vk
 
-    -- 1. Destroy Logical Device First
     if vk_state.device ~= nil then
         vk.vkDestroyDevice(vk_state.device, nil)
     end
 
-    -- 2. Destroy the Window Surface
     if vk_state.surface ~= nil then
         vk.vkDestroySurfaceKHR(vk_state.instance, vk_state.surface, nil)
     end
 
-    -- 3. Destroy the Instance Last
     if vk_state.instance ~= nil then
-        ffi.C.vx_sys_eject_validation(vk_state.instance)
+        if cfg.use_validation == 1 then
+            ffi.C.vx_sys_eject_validation(vk_state.instance)
+        end
         vk.vkDestroyInstance(vk_state.instance, nil)
     end
 end
