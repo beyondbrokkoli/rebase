@@ -1,6 +1,14 @@
 -- shader_gen.lua
 local reg = require("registry")
 
+-- Helper to sort table keys alphabetically
+local function get_sorted_keys(t)
+    local keys = {}
+    for k in pairs(t) do table.insert(keys, k) end
+    table.sort(keys)
+    return keys
+end
+
 local function generate_ssot(glsl_path, c_header_path)
     -- 1. Generate GLSL Constants
     local glsl = io.open(glsl_path, "w")
@@ -8,12 +16,14 @@ local function generate_ssot(glsl_path, c_header_path)
     glsl:write("#ifndef REGISTRY_GLSL\n#define REGISTRY_GLSL\n\n")
 
     glsl:write("// --- RENDER MODES ---\n")
-    for key, val in pairs(reg.mode) do
-        glsl:write(string.format("const uint MODE_%s = %dU;\n", string.upper(key), val))
+    local mode_keys = get_sorted_keys(reg.mode)
+    for _, k in ipairs(mode_keys) do
+        glsl:write(string.format("const uint MODE_%s = %dU;\n", string.upper(k), reg.mode[k]))
     end
     glsl:write("\n// --- ENGINE CONSTANTS ---\n")
-    for key, val in pairs(reg.cfg) do
-        glsl:write(string.format("const uint CFG_%s = %dU;\n", string.upper(key), val))
+    local cfg_keys = get_sorted_keys(reg.cfg)
+    for _, k in ipairs(cfg_keys) do
+        glsl:write(string.format("const uint CFG_%s = %dU;\n", string.upper(k), reg.cfg[k]))
     end
 
     glsl:write("\n#endif // REGISTRY_GLSL\n")
