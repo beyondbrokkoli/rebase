@@ -9,6 +9,10 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+// Activate the Vulkan structs for the main thread
+#define VX_ENABLE_VULKAN_STRUCTS
+#include "shared_structs.h"
+
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
@@ -272,135 +276,9 @@ EXPORT int vx_input_spacebar() {
     return atomic_load_explicit(&g_engine.mailbox.key_space, memory_order_acquire);
 }
 
-// MATHEMATICS & COMMAND STRUCTS
-typedef struct {
-    float m[16];
-} mat4_t;
-
-typedef struct {
-    mat4_t viewProj;
-    uint32_t soa_upload_idx;
-    uint32_t aos_current_idx;
-    uint32_t aos_prev_idx;
-    uint32_t particle_count;
-    float dt;
-    float total_time;
-    float spread;
-    float highlight_power;
-    uint32_t algae_color;
-    uint32_t water_color;
-    uint32_t bg_color_a;
-    uint32_t bg_color_b;
-    uint32_t target_state;
-    uint32_t sorted_idx;
-    uint32_t cell_counters_idx;
-    uint32_t cell_offsets_idx;
-} PushConstants;
-
-// DATA-ORIENTED RENDER QUEUE STRUCTS
-typedef struct {
-    uint64_t pipeline_id;
-    uint64_t descriptor_set;
-    uint32_t index_count;
-    uint32_t instance_count;
-    uint32_t first_index;
-    int32_t vertex_offset;
-    uint32_t first_instance;
-    uint16_t pc_offset;
-    uint16_t pc_size;
-    uint8_t push_constants[128];
-
-    int16_t scissor_x;
-    int16_t scissor_y;
-    uint16_t scissor_w;
-    uint16_t scissor_h;
-    uint8_t cull_mode;
-    uint8_t depth_test;
-    uint8_t depth_write;
-    uint8_t depth_compare_op;
-    uint8_t front_face;
-    uint8_t topology;
-    uint8_t _reserved[10];
-} DrawCommand;
-_Static_assert(sizeof(DrawCommand) == 192, "DrawCommand MUST be exactly 192 bytes!");
-
-typedef struct {
-    uint64_t pipeline_id;
-    uint64_t layout_id;
-    uint64_t descriptor_set;
-
-    uint32_t group_x;
-    uint32_t group_y;
-    uint32_t group_z;
-
-    uint16_t pc_offset;
-    uint16_t pc_size;
-
-    uint32_t barrier_src_stage;
-    uint32_t barrier_dst_stage;
-    uint32_t barrier_src_access;
-    uint32_t barrier_dst_access;
-
-    uint8_t push_constants[128];
-    uint8_t _padding[8];
-} ComputeCommand;
-
-_Static_assert(sizeof(ComputeCommand) == 192, "ComputeCommand MUST be exactly 192 bytes!");
-
-typedef struct __attribute__((packed, aligned(64))) {
-    // 1. Compute Graph
-    ComputeCommand* comp_queue;
-    uint32_t comp_count;
-    uint32_t _pad_comp;
-
-    // 2. Graphics Graph
-    DrawCommand* draw_queue;
-    uint32_t draw_count;
-    uint32_t _pad_draw;
-
-    // 3. Global Context
-    uint64_t gfx_layout;
-    uint64_t vertex_buffer;
-    uint64_t index_buffer;
-    uint64_t swapchain_image;
-    uint64_t swapchain_view;
-    uint64_t depth_image;
-    uint64_t depth_view;
-    uint32_t width;
-    uint32_t height;
-
-    uint8_t _padding[32]; // Fixed: 96 bytes of fields + 32 padding = 128 bytes
-} RenderPacket;
-
-_Static_assert(sizeof(RenderPacket) == 128, "RenderPacket MUST be exactly 128 bytes!");
-
 #define RING_SIZE 4
 #define LOAD(var) atomic_load_explicit(&(var), memory_order_acquire)
 #define STORE(var, val) atomic_store_explicit(&(var), (val), memory_order_release)
-
-typedef struct {
-    VkDevice device;                    // Restored from void*
-    VkQueue queue;                      // Restored from void*
-    VkSwapchainKHR swapchain;           // Restored from void*
-    uint64_t swapchain_images[10];
-    uint64_t swapchain_views[10];
-    VkSemaphore image_available[10];    // Restored from void*
-    VkSemaphore render_finished[10];    // Restored from void*
-    VkFence in_flight[10];              // Restored from void*
-    void* vkWaitForFences;
-    void* vkAcquireNextImageKHR;
-    void* vkResetFences;
-    void* vkQueueSubmit;
-    void* vkQueuePresentKHR;
-    void* pfnBegin;
-    void* pfnEnd;
-    void* pfnSetCullMode;
-    void* pfnSetFrontFace;
-    void* pfnSetPrimitiveTopology;
-    void* pfnSetDepthTestEnable;
-    void* pfnSetDepthWriteEnable;
-    void* pfnSetDepthCompareOp;
-} RenderThreadInit;
 
 // FFI-CONTRACT: RenderPacket mapping
 typedef struct {

@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "shared_structs.h"
+
 #ifdef _WIN32
     // Windows DLL export
     #define EXPORT __declspec(dllexport)
@@ -778,20 +780,7 @@ static inline void vmath_swarm_smales(int count, float* px, float* py, float* pz
     }
 }
 
-// INPUT HANDLING
-typedef struct {
-    uint32_t target_state;
-    uint32_t push_active;
-    uint32_t pull_active;
-    float mouse_x;
-    float mouse_y;
-    uint32_t _padding[3];
-} SwarmCommand;
-
-_Static_assert(sizeof(SwarmCommand) == 32, "SwarmCommand MUST be exactly 32 bytes!");
-
 // 4. THE FORK-JOIN THREAD POOL STATE
-
 #define MAX_WORKERS 32
 
 typedef enum { JOB_NONE, JOB_SWARM_STEP, JOB_EXIT } JobType;

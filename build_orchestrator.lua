@@ -36,15 +36,12 @@ local function compile_engine(platform)
     print("   Target Platform: " .. string.upper(platform))
     print("========================================")
 
-    -- ==========================================
     -- THE SSOT BRIDGE: Generate the GLSL Header
-    -- ==========================================
-    print("\n[0/X] Generating GLSL Single Source of Truth...")
-    local gen_cmd = 'luajit -e "require(\'shader_gen\').generate(\'registry.glsl\')"'
-    
-    -- THE FIX: Use your native run_cmd wrapper!
+    print("\n[0/X] Generating GLSL & C Header SSoT...")
+    local gen_cmd = 'luajit -e "require(\'shader_gen\').generate(\'registry.glsl\', \'shared_structs.h\')"'
+
     if not run_cmd(gen_cmd) then
-        print("ERROR: Failed to generate registry.glsl!")
+        print("ERROR: Failed to generate SSoT files!")
         os.exit(1)
     end
 
@@ -89,7 +86,7 @@ local function compile_engine(platform)
         -- WINDOWS BUILD PIPELINE
         print("\n[1/4] Compiling SPIR-V Shaders...")
         local glslc = VULKAN_SDK_PATH .. "/Bin/glslc.exe"
-        
+
         for _, s in ipairs(shaders) do
             -- Reverted to your unquoted glslc path string!
             local cmd = string.format('%s %s -o %s -I.', glslc, s[1], s[2])
@@ -216,6 +213,9 @@ print("\n--- AI SNAPSHOT ---")
 local order = get_sorted_files()
 
 -- Explicitly add C backends to the snapshot since require() won't find them
+table.insert(order, "build_orchestrator.lua")
+table.insert(order, "shared_structs.h")
+table.insert(order, "shader_gen.lua")
 table.insert(order, "main.c")
 table.insert(order, "vx_math.c")
 
